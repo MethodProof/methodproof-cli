@@ -16,7 +16,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     completed_at REAL,
     total_events INTEGER DEFAULT 0,
     synced INTEGER DEFAULT 0,
-    remote_id TEXT
+    remote_id TEXT,
+    repo_url TEXT,
+    tags TEXT DEFAULT '[]',
+    visibility TEXT DEFAULT 'private'
 );
 CREATE TABLE IF NOT EXISTS events (
     id TEXT PRIMARY KEY,
@@ -71,12 +74,30 @@ def _db() -> sqlite3.Connection:
 def init_db() -> None:
     config.ensure_dirs()
     _db().executescript(_SCHEMA)
+    _migrate()
 
 
-def create_session(session_id: str, watch_dir: str) -> None:
+def _migrate() -> None:
+    """Add columns for existing databases that predate repo/tags/visibility."""
+    db = _db()
+    cols = {r[1] for r in db.execute("PRAGMA table_info(sessions)").fetchall()}
+    for col, default in [("repo_url", None), ("tags", "'[]'"), ("visibility", "'private'")]:
+        if col not in cols:
+            ddl = f"ALTER TABLE sessions ADD COLUMN {col} TEXT"
+            if default:
+                ddl += f" DEFAULT {default}"
+            db.execute(ddl)
+    db.commit()
+
+
+def create_session(
+    session_id: str, watch_dir: str,
+    repo_url: str | None = None, tags: str = "[]", visibility: str = "private",
+) -> None:
     _db().execute(
-        "INSERT INTO sessions (id, watch_dir, created_at) VALUES (?, ?, ?)",
-        (session_id, watch_dir, time.time()),
+        "INSERT INTO sessions (id, watch_dir, created_at, repo_url, tags, visibility) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (session_id, watch_dir, time.time(), repo_url, tags, visibility),
     )
     _db().commit()
 
@@ -185,6 +206,22 @@ def get_graph(session_id: str) -> dict[str, Any]:
             unique_nodes.append(n)
 
     return {"nodes": unique_nodes, "edges": edges}
+
+
+def update_tags(session_id: str, tags: list[str]) -> None:
+    _db().execute(
+        "UPDATE sessions SET tags = ? WHERE id = ?",
+        (json.dumps(tags), session_id),
+    )
+    _db().commit()
+
+
+def update_visibility(session_id: str, visibility: str) -> None:
+    _db().execute(
+        "UPDATE sessions SET visibility = ? WHERE id = ?",
+        (visibility, session_id),
+    )
+    _db().commit()
 
 
 def mark_synced(session_id: str, remote_id: str) -> None:

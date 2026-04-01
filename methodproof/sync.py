@@ -8,6 +8,24 @@ from typing import Any
 from methodproof import store
 
 
+def sync_metadata(session: dict[str, Any], token: str, api_url: str) -> None:
+    """Sync repo, tags, and visibility for an already-pushed session."""
+    remote_id = session.get("remote_id")
+    if not remote_id:
+        return
+    repo_url = session.get("repo_url")
+    if repo_url:
+        _request("POST", f"/sessions/{remote_id}/repos", api_url, token,
+                 {"remote_url": repo_url, "detected_by": "cli"})
+    tags = json.loads(session.get("tags") or "[]")
+    if tags:
+        _request("PUT", f"/sessions/{remote_id}/tags", api_url, token,
+                 {"tags": tags})
+    if session.get("visibility") == "public":
+        _request("PUT", f"/sessions/{remote_id}/visibility", api_url, token,
+                 {"visibility": "public"})
+
+
 def _request(
     method: str, path: str, api_url: str, token: str,
     body: dict[str, Any] | None = None,
@@ -63,6 +81,11 @@ def push(session_id: str, token: str, api_url: str) -> None:
     # Complete
     _request("PUT", f"/personal/sessions/{remote_id}/complete", api_url, token)
     store.mark_synced(session_id, remote_id)
+
+    # Sync metadata (repo, tags, visibility)
+    session["remote_id"] = remote_id
+    sync_metadata(session, token, api_url)
+
     print(f"Pushed: {session_id[:8]} -> {api_url}")
 
 

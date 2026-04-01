@@ -2,16 +2,19 @@
 
 Usage:
     methodproof init              Install shell hook, create data directory
-    methodproof start [--dir .]   Start recording a session
+    methodproof start [--dir .] [--repo URL] [--tags t1,t2] [--public]
     methodproof stop              Stop recording, build process graph
     methodproof view [id]         View session graph in browser
     methodproof log               List local sessions
+    methodproof tag <id> <tags>   Tag a session (comma-separated)
+    methodproof publish [id]      Set public visibility and push
     methodproof login             Connect to MethodProof platform
     methodproof push [id]         Upload session to platform
 """
 
 import argparse
 import getpass
+import json
 import os
 import signal
 import sys
@@ -20,7 +23,7 @@ import time
 import uuid
 from datetime import datetime, UTC
 
-from methodproof import config, store, graph, hook
+from methodproof import config, store, graph, hook, repos
 
 PIDFILE = config.DIR / "methodproof.pid"
 
@@ -54,6 +57,16 @@ def cmd_init(args: argparse.Namespace) -> None:
     else:
         print("AI CLI wrappers: no tools found (codex, gemini, aider)")
 
+    from methodproof.hooks.openclaw_install import install as install_openclaw_hooks, install_skill
+    oc_result = install_openclaw_hooks()
+    if oc_result is None:
+        print("OpenClaw: not found (hooks + skill skipped)")
+    else:
+        print(f"OpenClaw hooks: {oc_result}")
+        skill_result = install_skill()
+        if skill_result:
+            print(f"OpenClaw skill: {skill_result}")
+
     print("Restart your shell, then run: methodproof start")
 
 
@@ -69,7 +82,10 @@ def cmd_start(args: argparse.Namespace) -> None:
 
     sid = uuid.uuid4().hex
     watch_dir = os.path.abspath(args.dir or ".")
-    store.create_session(sid, watch_dir)
+    repo_url = args.repo or repos.detect_repo(watch_dir)
+    tags = args.tags.split(",") if args.tags else []
+    visibility = "public" if args.public else "private"
+    store.create_session(sid, watch_dir, repo_url, json.dumps(tags), visibility)
     cfg["active_session"] = sid
     config.save(cfg)
     PIDFILE.write_text(str(os.getpid()))
@@ -89,6 +105,8 @@ def cmd_start(args: argparse.Namespace) -> None:
 
     print(f"Recording: {sid[:8]}")
     print(f"Watching:  {watch_dir}")
+    if repo_url:
+        print(f"Repo:      {repo_url}")
     print(f"Bridge:    http://localhost:9877")
     print("Press Ctrl+C or run `methodproof stop` to finish.")
 
@@ -158,10 +176,17 @@ def cmd_log(args: argparse.Namespace) -> None:
         print("No sessions yet.")
         return
     for s in sessions:
-        tag = "synced" if s["synced"] else "local"
+        sync_tag = "synced" if s["synced"] else "local"
         dt = datetime.fromtimestamp(s["created_at"], tz=UTC).strftime("%Y-%m-%d %H:%M")
         dur = _duration(s)
-        print(f"  {s['id'][:8]}  {dt}  {dur}  {s['total_events']} events  [{tag}]")
+        vis = s.get("visibility", "private")
+        tags = json.loads(s.get("tags") or "[]")
+        suffix = f"  [{sync_tag}]"
+        if vis != "private":
+            suffix += f"  {vis}"
+        if tags:
+            suffix += f"  #{','.join(tags)}"
+        print(f"  {s['id'][:8]}  {dt}  {dur}  {s['total_events']} events{suffix}")
 
 
 def cmd_login(args: argparse.Namespace) -> None:
@@ -201,6 +226,49 @@ def cmd_push(args: argparse.Namespace) -> None:
     push(sid, cfg["token"], cfg["api_url"])
 
 
+def cmd_tag(args: argparse.Namespace) -> None:
+    session = _resolve_session(args.session_id)
+    tags = [t.strip() for t in args.tags.split(",") if t.strip()]
+    existing = json.loads(session.get("tags") or "[]")
+    merged = list(dict.fromkeys(existing + tags))
+    store.update_tags(session["id"], merged)
+    print(f"Tagged {session['id'][:8]}: {merged}")
+
+
+def cmd_publish(args: argparse.Namespace) -> None:
+    cfg = config.load()
+    if not cfg.get("token"):
+        print("Run `methodproof login` first.")
+        sys.exit(1)
+    session = _resolve_session(args.session_id)
+    store.update_visibility(session["id"], "public")
+    session["visibility"] = "public"
+    if not session["synced"]:
+        from methodproof.sync import push
+        push(session["id"], cfg["token"], cfg["api_url"])
+    else:
+        from methodproof.sync import sync_metadata
+        sync_metadata(session, cfg["token"], cfg["api_url"])
+    print(f"Published: {session['id'][:8]}")
+
+
+def _resolve_session(session_id: str) -> dict:
+    sid = session_id or _latest()
+    if not sid:
+        print("No sessions found.")
+        sys.exit(1)
+    session = store.get_session(sid)
+    if not session:
+        # Try prefix match
+        sessions = store.list_sessions()
+        matches = [s for s in sessions if s["id"].startswith(sid)]
+        if len(matches) == 1:
+            return matches[0]
+        print(f"Session not found: {sid}")
+        sys.exit(1)
+    return session
+
+
 def cmd_mcp_serve(args: argparse.Namespace) -> None:
     from methodproof.mcp import serve
     serve()
@@ -235,6 +303,9 @@ def main() -> None:
     sub.add_parser("init", help="Install shell hook")
     s = sub.add_parser("start", help="Start recording")
     s.add_argument("--dir", help="Directory to watch")
+    s.add_argument("--repo", help="Git remote URL (overrides auto-detect)")
+    s.add_argument("--public", action="store_true", help="Set visibility to public")
+    s.add_argument("--tags", help="Comma-separated tags")
     sub.add_parser("stop", help="Stop recording")
     v = sub.add_parser("view", help="View session graph")
     v.add_argument("session_id", nargs="?")
@@ -244,13 +315,19 @@ def main() -> None:
     l.add_argument("--api-url")
     pu = sub.add_parser("push", help="Upload to platform")
     pu.add_argument("session_id", nargs="?")
+    tg = sub.add_parser("tag", help="Tag a session")
+    tg.add_argument("session_id", help="Session ID (prefix ok)")
+    tg.add_argument("tags", help="Comma-separated tags")
+    pb = sub.add_parser("publish", help="Set public and push")
+    pb.add_argument("session_id", nargs="?")
     sub.add_parser("mcp-serve", help="Run MCP server (used by Claude Code)")
 
     args = p.parse_args()
     cmds = {
         "init": cmd_init, "start": cmd_start, "stop": cmd_stop,
         "view": cmd_view, "log": cmd_log, "login": cmd_login,
-        "push": cmd_push, "mcp-serve": cmd_mcp_serve,
+        "push": cmd_push, "tag": cmd_tag, "publish": cmd_publish,
+        "mcp-serve": cmd_mcp_serve,
     }
     fn = cmds.get(args.cmd)
     if not fn:
