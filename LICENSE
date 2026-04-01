@@ -1,21 +1,29 @@
-MIT License
+MethodProof Proprietary License
 
-Copyright (c) 2026 MethodProof
+Copyright (c) 2026 MethodProof, Inc. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This software and associated documentation files (the "Software") are the
+proprietary property of MethodProof, Inc. Unauthorized copying, modification,
+distribution, or use of this Software, via any medium, is strictly prohibited.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+The Software is provided under a limited, non-exclusive, non-transferable,
+revocable license solely for personal, non-commercial use by individuals who
+have downloaded it from an official MethodProof distribution channel.
+
+You MAY:
+- Download and install the Software for personal use
+- Use the Software to capture and analyze your own coding process
+- Store session data locally on your own machine
+
+You MAY NOT:
+- Copy, modify, merge, or create derivative works of the Software
+- Distribute, sublicense, sell, or otherwise transfer the Software
+- Reverse engineer, decompile, or disassemble the Software
+- Use the Software in any commercial product or service
+- Remove or alter any proprietary notices or labels
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+IMPLIED. IN NO EVENT SHALL METHODPROOF, INC. BE LIABLE FOR ANY CLAIM, DAMAGES
+OR OTHER LIABILITY ARISING FROM THE USE OF THE SOFTWARE.
+
+For commercial licensing inquiries, contact: legal@methodproof.com
