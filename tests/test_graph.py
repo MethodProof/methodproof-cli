@@ -122,6 +122,51 @@ def test_artifact_creation() -> None:
     assert db.execute("SELECT count(*) FROM artifacts WHERE path='src/main.py'").fetchone()[0] == 1
 
 
+def test_pasted_from_link() -> None:
+    """browser_copy → file_edit within 30s, length match."""
+    sid = _session([
+        _event("browser_copy", 100, {"text_length": 120, "source_url": "https://so.com",
+               "source_domain": "so.com", "text_snippet": "code..."}),
+        _event("file_edit", 115, {"path": "a.py", "lines_added": 3,  # 3*40=120
+               "lines_removed": 0, "diff": "+code", "is_ai_generated": False}),
+    ])
+    graph.build(sid)
+    db = store._db()
+    assert db.execute("SELECT count(*) FROM causal_links WHERE type='PASTED_FROM'").fetchone()[0] == 1
+
+
+def test_sent_to_resource_link() -> None:
+    """llm_prompt → SENT_TO → Resource."""
+    sid = _session([
+        _event("llm_prompt", 100, {"model": "claude", "prompt_text": "hi",
+               "token_count": 10, "temperature": 0.7, "tools_available": []}),
+    ])
+    graph.build(sid)
+    db = store._db()
+    assert db.execute("SELECT count(*) FROM action_resources WHERE relation_type='SENT_TO'").fetchone()[0] == 1
+
+
+def test_produced_artifact_link() -> None:
+    """file_create → PRODUCED → Artifact."""
+    sid = _session([
+        _event("file_create", 100, {"path": "main.py", "size": 200, "language": "python"}),
+    ])
+    graph.build(sid)
+    db = store._db()
+    assert db.execute("SELECT count(*) FROM action_artifacts WHERE relation_type='PRODUCED'").fetchone()[0] == 1
+
+
+def test_modified_artifact_link() -> None:
+    """file_edit → MODIFIED → Artifact."""
+    sid = _session([
+        _event("file_edit", 100, {"path": "main.py", "lines_added": 5,
+               "lines_removed": 0, "diff": "+code", "is_ai_generated": False}),
+    ])
+    graph.build(sid)
+    db = store._db()
+    assert db.execute("SELECT count(*) FROM action_artifacts WHERE relation_type='MODIFIED'").fetchone()[0] == 1
+
+
 def test_build_returns_stats() -> None:
     sid = _session([_event("terminal_cmd", 100), _event("file_edit", 105)])
     stats = graph.build(sid)

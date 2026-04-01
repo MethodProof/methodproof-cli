@@ -1,10 +1,8 @@
 """Terminal monitor — captures commands from shell hook JSONL log."""
 
 import json
-import os
 import re
 import threading
-import time
 
 from methodproof.agents import base
 from methodproof.config import CMD_LOG
@@ -24,12 +22,38 @@ TEST_FRAMEWORKS = {
     "cargo_test": re.compile(r"\bcargo test\b"),
 }
 
+_PYTEST_RE = re.compile(r"(\d+) passed(?:.*?(\d+) failed)?")
+_JEST_RE = re.compile(r"Tests:\s+(?:(\d+) failed,\s+)?(\d+) passed")
+_CARGO_RE = re.compile(r"(\d+) passed.*?(\d+) failed")
+
 
 def _detect_test(command: str) -> str | None:
     for name, pattern in TEST_FRAMEWORKS.items():
         if pattern.search(command):
             return name
     return None
+
+
+def _parse_test_results(output: str, framework: str, exit_code: int) -> tuple[int, int]:
+    """Extract pass/fail counts from test output. Falls back to exit code heuristic."""
+    if framework == "pytest":
+        m = _PYTEST_RE.search(output)
+        if m:
+            return int(m.group(1)), int(m.group(2) or 0)
+    elif framework == "jest":
+        m = _JEST_RE.search(output)
+        if m:
+            return int(m.group(2) or 0), int(m.group(1) or 0)
+    elif framework == "go_test":
+        return output.count("--- PASS"), output.count("--- FAIL")
+    elif framework == "cargo_test":
+        m = _CARGO_RE.search(output)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+    # Fallback: exit code 0 = all passed, non-zero = at least 1 failure
+    if exit_code == 0:
+        return 1, 0
+    return 0, 1
 
 
 def start(stop: threading.Event) -> None:
@@ -77,7 +101,8 @@ def _process(line: str) -> None:
 
     framework = _detect_test(command)
     if framework:
+        passed, failed = _parse_test_results(output, framework, exit_code)
         base.emit("test_run", {
-            "framework": framework, "passed": 0, "failed": 0,
+            "framework": framework, "passed": passed, "failed": failed,
             "duration_ms": duration,
         })

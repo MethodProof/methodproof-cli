@@ -44,6 +44,16 @@ CREATE TABLE IF NOT EXISTS artifacts (
     id TEXT PRIMARY KEY, path TEXT NOT NULL, type TEXT DEFAULT 'file',
     size_bytes INTEGER DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS action_resources (
+    action_id TEXT NOT NULL, resource_id TEXT NOT NULL,
+    relation_type TEXT NOT NULL, metadata TEXT DEFAULT '{}',
+    PRIMARY KEY (action_id, resource_id, relation_type)
+);
+CREATE TABLE IF NOT EXISTS action_artifacts (
+    action_id TEXT NOT NULL, artifact_id TEXT NOT NULL,
+    relation_type TEXT NOT NULL,
+    PRIMARY KEY (action_id, artifact_id, relation_type)
+);
 """
 
 _conn: sqlite3.Connection | None = None
@@ -134,7 +144,40 @@ def get_graph(session_id: str) -> dict[str, Any]:
     ).fetchall():
         edges.append({"source": row["source_id"], "target": row["target_id"],
                        "type": row["type"], "properties": {"confidence": row["confidence"]}})
-    return {"nodes": nodes, "edges": edges}
+
+    # Resource nodes + action→resource edges
+    for row in _db().execute(
+        "SELECT ar.action_id, ar.resource_id, ar.relation_type, r.type AS rtype, r.identifier "
+        "FROM action_resources ar JOIN resources r ON r.id = ar.resource_id "
+        "WHERE ar.action_id IN (SELECT id FROM events WHERE session_id = ?)",
+        (session_id,),
+    ).fetchall():
+        nodes.append({"id": row["resource_id"], "type": "Resource",
+                       "label": row["identifier"], "properties": {"resource_type": row["rtype"]}})
+        edges.append({"source": row["action_id"], "target": row["resource_id"],
+                       "type": row["relation_type"], "properties": {}})
+
+    # Artifact nodes + action→artifact edges
+    for row in _db().execute(
+        "SELECT aa.action_id, aa.artifact_id, aa.relation_type, a.path, a.type AS atype "
+        "FROM action_artifacts aa JOIN artifacts a ON a.id = aa.artifact_id "
+        "WHERE aa.action_id IN (SELECT id FROM events WHERE session_id = ?)",
+        (session_id,),
+    ).fetchall():
+        nodes.append({"id": row["artifact_id"], "type": "Artifact",
+                       "label": row["path"], "properties": {"artifact_type": row["atype"]}})
+        edges.append({"source": row["action_id"], "target": row["artifact_id"],
+                       "type": row["relation_type"], "properties": {}})
+
+    # Deduplicate nodes (resources/artifacts may appear multiple times)
+    seen: set[str] = set()
+    unique_nodes = []
+    for n in nodes:
+        if n["id"] not in seen:
+            seen.add(n["id"])
+            unique_nodes.append(n)
+
+    return {"nodes": unique_nodes, "edges": edges}
 
 
 def mark_synced(session_id: str, remote_id: str) -> None:

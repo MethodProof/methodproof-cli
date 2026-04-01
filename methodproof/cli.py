@@ -22,6 +22,8 @@ from datetime import datetime, UTC
 
 from methodproof import config, store, graph, hook
 
+PIDFILE = config.DIR / "methodproof.pid"
+
 
 def cmd_init(args: argparse.Namespace) -> None:
     config.ensure_dirs()
@@ -46,21 +48,24 @@ def cmd_start(args: argparse.Namespace) -> None:
     store.create_session(sid, watch_dir)
     cfg["active_session"] = sid
     config.save(cfg)
+    PIDFILE.write_text(str(os.getpid()))
 
-    # Start agents as threads
     from methodproof.agents import base, watcher, terminal
+    from methodproof import bridge
     base.init(sid)
     stop_event = threading.Event()
 
     threads = [
         threading.Thread(target=watcher.start, args=(watch_dir, stop_event), daemon=True),
         threading.Thread(target=terminal.start, args=(stop_event,), daemon=True),
+        threading.Thread(target=bridge.start, args=(sid, stop_event, 9877), daemon=True),
     ]
     for t in threads:
         t.start()
 
     print(f"Recording: {sid[:8]}")
     print(f"Watching:  {watch_dir}")
+    print(f"Bridge:    http://localhost:9877")
     print("Press Ctrl+C or run `methodproof stop` to finish.")
 
     def _shutdown(sig: int, frame: object) -> None:
@@ -69,15 +74,16 @@ def cmd_start(args: argparse.Namespace) -> None:
         store.complete_session(sid)
         stats = graph.build(sid)
         session = store.get_session(sid)
+        cfg = config.load()
         cfg["active_session"] = None
         config.save(cfg)
+        PIDFILE.unlink(missing_ok=True)
         _print_summary(session, stats)
         sys.exit(0)
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    # Periodic flush
     while not stop_event.is_set():
         time.sleep(5)
         base.flush()
@@ -90,8 +96,18 @@ def cmd_stop(args: argparse.Namespace) -> None:
         print("No active session.")
         sys.exit(1)
 
-    # The start process handles its own shutdown via signals.
-    # If stop is called from another terminal, we complete the session directly.
+    # Signal the start process if it's running
+    if PIDFILE.exists():
+        try:
+            pid = int(PIDFILE.read_text().strip())
+            os.kill(pid, signal.SIGTERM)
+            print(f"Stopping session {sid[:8]}...")
+            time.sleep(3)
+            return
+        except (ProcessLookupError, ValueError):
+            PIDFILE.unlink(missing_ok=True)
+
+    # Fallback: start process is gone, complete directly
     from methodproof.agents import base
     base.init(sid)
     base.flush()
@@ -161,8 +177,6 @@ def cmd_push(args: argparse.Namespace) -> None:
     push(sid, cfg["token"], cfg["api_url"])
 
 
-# --- Helpers ---
-
 def _latest() -> str | None:
     sessions = store.list_sessions()
     return sessions[0]["id"] if sessions else None
@@ -184,8 +198,6 @@ def _print_summary(session: dict | None, stats: dict) -> None:
     print(f"  Graph:   {stats['next']} links, {stats['causal']} causal")
     print(f"\nRun `methodproof view` to explore.")
 
-
-# --- Entry point ---
 
 def main() -> None:
     p = argparse.ArgumentParser(prog="methodproof", description="See how you code")
