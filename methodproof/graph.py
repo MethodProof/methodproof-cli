@@ -44,12 +44,20 @@ def build(session_id: str) -> dict[str, int]:
     stats["causal"] += _link(db, session_id, "browser_search", "browser_visit",
                               "LED_TO", 120)
     stats["causal"] += _link_pasted(db, session_id)
+    # Agent causal links (OpenClaw / agent gateways)
+    stats["causal"] += _link(db, session_id, "agent_prompt", "agent_completion",
+                              "RECEIVED", 120, match_model=True)
+    stats["causal"] += _link(db, session_id, "agent_completion", "file_edit",
+                              "INFORMED", 60)
 
     # Resources
     for e in events:
         meta = json.loads(e["metadata"])
         if e["type"] in ("llm_prompt", "llm_completion") and "model" in meta:
             _ensure_resource(db, "llm_model", meta["model"])
+            stats["resources"] += 1
+        elif e["type"] in ("agent_prompt", "agent_completion") and "gateway" in meta:
+            _ensure_resource(db, "agent_gateway", meta["gateway"])
             stats["resources"] += 1
 
     # Artifacts
@@ -105,7 +113,7 @@ def _link_pasted(db: object, sid: str) -> int:
 
 
 def _link_action_resources(db: object, sid: str) -> None:
-    """Link llm_prompt → SENT_TO → Resource, llm_completion → CONSUMED → Resource."""
+    """Link prompt → SENT_TO → Resource, completion → CONSUMED → Resource."""
     db.execute("""
     INSERT OR IGNORE INTO action_resources (action_id, resource_id, relation_type, metadata)
     SELECT e.id, r.id, 'SENT_TO', '{}'
@@ -117,6 +125,13 @@ def _link_action_resources(db: object, sid: str) -> None:
     SELECT e.id, r.id, 'CONSUMED', '{}'
     FROM events e JOIN resources r ON r.identifier = json_extract(e.metadata, '$.model')
     WHERE e.session_id = ? AND e.type = 'llm_completion' AND r.type = 'llm_model'
+    """, (sid,))
+    # Agent gateway links
+    db.execute("""
+    INSERT OR IGNORE INTO action_resources (action_id, resource_id, relation_type, metadata)
+    SELECT e.id, r.id, 'SENT_TO', '{}'
+    FROM events e JOIN resources r ON r.identifier = json_extract(e.metadata, '$.gateway')
+    WHERE e.session_id = ? AND e.type = 'agent_prompt' AND r.type = 'agent_gateway'
     """, (sid,))
 
 

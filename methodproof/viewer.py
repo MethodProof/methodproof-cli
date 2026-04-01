@@ -71,9 +71,13 @@ const COLORS = {
   // Tasks
   task_created:'#9a7b3a',task_completed:'#9a7b3a',
   claude_session_start:'#6b5528',claude_code_event:'#6b5528',
+  // Agent actions — amber (OpenClaw / agent gateways)
+  agent_prompt:'#d4a843',agent_completion:'#d4a843',
+  agent_tool_dispatch:'#b8943f',agent_tool_result:'#b8943f',
+  agent_skill_invoke:'#c9a84c',agent_session_event:'#6b5528',
 };
 // Edges: NEXT is ember trace, causal links are gold
-const EDGE_COLORS = {NEXT:'#3d3118',RECEIVED:'#c9a84c',INFORMED:'#9a7b3a',LED_TO:'#9a7b3a',PASTED_FROM:'#6b5528',SENT_TO:'#9a7b3a',CONSUMED:'#9a7b3a',PRODUCED:'#6b5528',MODIFIED:'#6b5528'};
+const EDGE_COLORS = {NEXT:'#3d3118',RECEIVED:'#c9a84c',INFORMED:'#9a7b3a',LED_TO:'#9a7b3a',PASTED_FROM:'#6b5528',SENT_TO:'#9a7b3a',CONSUMED:'#9a7b3a',PRODUCED:'#6b5528',MODIFIED:'#6b5528',DISPATCHED:'#d4a843',RETURNED:'#b8943f'};
 const SID = new URLSearchParams(location.search).get('session') || '';
 
 async function load() {
