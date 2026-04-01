@@ -49,15 +49,31 @@ canvas { width: 100%; height: 100%; }
 </div>
 <div class="timeline" id="timeline"></div>
 <script>
+// KINMYAKU palette: gold = AI, aged gold = code, ember = terminal, cream = browser, dim = passive
 const COLORS = {
-  llm_prompt:'#c9a84c',llm_completion:'#d4a843',file_edit:'#4a9eff',file_create:'#2ecc71',
-  file_delete:'#e74c3c',terminal_cmd:'#9b59b6',test_run:'#1abc9c',git_commit:'#e67e22',
-  web_search:'#3498db',web_visit:'#2980b9',browser_search:'#8e44ad',browser_visit:'#6c3483',
-  browser_copy:'#f39c12',browser_tab_switch:'#95a5a6',browser_ai_chat:'#e91e63',
-  inline_completion_shown:'#ff9800',inline_completion_accepted:'#4caf50',
-  inline_completion_rejected:'#f44336',
+  // AI actions — bright gold (the vein)
+  llm_prompt:'#c9a84c',llm_completion:'#c9a84c',
+  user_prompt:'#c9a84c',tool_call:'#9a7b3a',tool_result:'#9a7b3a',
+  agent_launch:'#c9a84c',agent_complete:'#9a7b3a',
+  ai_cli_start:'#c9a84c',ai_cli_end:'#9a7b3a',
+  // Inline completions — gold spectrum
+  inline_completion_shown:'#9a7b3a',inline_completion_accepted:'#c9a84c',
+  inline_completion_rejected:'#6b5528',
+  // File operations — aged gold (the rock around the vein)
+  file_edit:'#9a7b3a',file_create:'#b8943f',file_delete:'#6b5528',
+  git_commit:'#b8943f',
+  // Terminal — ember (the furnace)
+  terminal_cmd:'#8b8171',test_run:'#8b8171',
+  // Browser — cream/dim (the surface)
+  web_search:'#e0dbd0',web_visit:'#8b8171',
+  browser_search:'#e0dbd0',browser_visit:'#8b8171',
+  browser_copy:'#9a7b3a',browser_tab_switch:'#6b5528',browser_ai_chat:'#c9a84c',
+  // Tasks
+  task_created:'#9a7b3a',task_completed:'#9a7b3a',
+  claude_session_start:'#6b5528',claude_code_event:'#6b5528',
 };
-const EDGE_COLORS = {NEXT:'#2a2825',RECEIVED:'#c9a84c',INFORMED:'#4a9eff',LED_TO:'#3498db',PASTED_FROM:'#f39c12'};
+// Edges: NEXT is ember trace, causal links are gold
+const EDGE_COLORS = {NEXT:'#3d3118',RECEIVED:'#c9a84c',INFORMED:'#9a7b3a',LED_TO:'#9a7b3a',PASTED_FROM:'#6b5528',SENT_TO:'#9a7b3a',CONSUMED:'#9a7b3a',PRODUCED:'#6b5528',MODIFIED:'#6b5528'};
 const SID = new URLSearchParams(location.search).get('session') || '';
 
 async function load() {
