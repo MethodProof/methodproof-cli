@@ -47,6 +47,13 @@ def cmd_init(args: argparse.Namespace) -> None:
     else:
         print(f"Claude Code MCP: registered in {mcp_result}")
 
+    from methodproof.hooks.wrappers import install as install_wrappers
+    wrapped = install_wrappers()
+    if wrapped:
+        print(f"AI CLI wrappers: {', '.join(wrapped)}")
+    else:
+        print("AI CLI wrappers: no tools found (codex, gemini, aider)")
+
     print("Restart your shell, then run: methodproof start")
 
 
