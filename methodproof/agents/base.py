@@ -10,14 +10,17 @@ from typing import Any
 from methodproof import store
 
 _session_id = ""
+_initialized = False
 _lock = threading.Lock()
 _buffer: list[dict[str, Any]] = []
 _FLUSH_SIZE = 50
+_MAX_RETRIES = 3
 
 
 def init(session_id: str) -> None:
-    global _session_id
+    global _session_id, _initialized
     _session_id = session_id
+    _initialized = True
 
 
 def log(level: str, event: str, **kw: object) -> None:
@@ -26,6 +29,9 @@ def log(level: str, event: str, **kw: object) -> None:
 
 
 def emit(event_type: str, metadata: dict[str, Any]) -> None:
+    if not _initialized:
+        log("warning", "emit.before_init", type=event_type)
+        return
     entry = {
         "id": uuid.uuid4().hex,
         "session_id": _session_id,
@@ -48,8 +54,14 @@ def flush() -> None:
 def _flush_locked() -> None:
     if not _buffer:
         return
-    try:
-        store.insert_events(_session_id, list(_buffer))
-    except Exception as exc:
-        log("error", "flush.failed", error=str(exc))
-    _buffer.clear()
+    batch = list(_buffer)
+    for attempt in range(_MAX_RETRIES):
+        try:
+            store.insert_events(_session_id, batch)
+            _buffer.clear()
+            return
+        except Exception as exc:
+            log("warning", "flush.retry", attempt=attempt + 1, error=str(exc))
+            time.sleep(0.1 * (attempt + 1))
+    # Final attempt failed — keep events in buffer for next flush cycle
+    log("error", "flush.failed", count=len(batch), retries=_MAX_RETRIES)

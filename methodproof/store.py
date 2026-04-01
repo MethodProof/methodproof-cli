@@ -95,12 +95,19 @@ def complete_session(session_id: str) -> None:
 
 def insert_events(session_id: str, events: list[dict[str, Any]]) -> None:
     db = _db()
+    rows = []
+    for e in events:
+        try:
+            meta = json.dumps(e.get("metadata", {}), default=str)
+        except (TypeError, ValueError):
+            meta = "{}"
+        rows.append((
+            e["id"], session_id, e["type"], e["timestamp"],
+            e.get("duration_ms", 0), meta,
+        ))
     db.executemany(
         "INSERT OR IGNORE INTO events (id, session_id, type, timestamp, duration_ms, metadata) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        [(e["id"], session_id, e["type"], e["timestamp"],
-          e.get("duration_ms", 0), json.dumps(e.get("metadata", {})))
-         for e in events],
+        "VALUES (?, ?, ?, ?, ?, ?)", rows,
     )
     db.commit()
 

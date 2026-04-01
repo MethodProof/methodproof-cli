@@ -23,12 +23,16 @@ def install() -> str | None:
     CLAUDE_DIR.mkdir(exist_ok=True)
     script = str(HOOK_SCRIPT)
 
-    # Load existing settings
+    # Load existing settings (backup before modifying)
     settings: dict = {}
     if SETTINGS_FILE.exists():
+        raw = SETTINGS_FILE.read_text()
         try:
-            settings = json.loads(SETTINGS_FILE.read_text())
+            settings = json.loads(raw)
         except json.JSONDecodeError:
+            # Corrupted settings — backup and start fresh
+            backup = SETTINGS_FILE.with_suffix(".json.bak")
+            backup.write_text(raw)
             settings = {}
 
     hooks = settings.get("hooks", {})

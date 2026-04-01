@@ -111,12 +111,18 @@ def register_with_claude() -> str | None:
 
     mp_bin = shutil.which("methodproof")
     if not mp_bin:
-        return None
-
-    servers["methodproof"] = {
-        "command": mp_bin,
-        "args": ["mcp-serve"],
-    }
+        # Fallback: use python -m methodproof
+        import sys
+        mp_bin = sys.executable
+        servers["methodproof"] = {
+            "command": mp_bin,
+            "args": ["-m", "methodproof", "mcp-serve"],
+        }
+    else:
+        servers["methodproof"] = {
+            "command": mp_bin,
+            "args": ["mcp-serve"],
+        }
     settings["mcpServers"] = servers
     settings_file.write_text(json.dumps(settings, indent=2) + "\n")
     return str(settings_file)
