@@ -29,7 +29,24 @@ def cmd_init(args: argparse.Namespace) -> None:
     config.ensure_dirs()
     store.init_db()
     rc = hook.install()
-    print(f"Hook installed: {rc}")
+    print(f"Shell hook: {rc}")
+
+    from methodproof.hooks.install import install as install_claude_hooks
+    result = install_claude_hooks()
+    if result is None:
+        print("Claude Code: not found (hooks skipped)")
+    else:
+        print(f"Claude Code hooks: {result}")
+
+    from methodproof.mcp import register_with_claude
+    mcp_result = register_with_claude()
+    if mcp_result is None:
+        print("Claude Code: MCP server not registered (skipped)")
+    elif mcp_result == "already registered":
+        print("Claude Code MCP: already registered")
+    else:
+        print(f"Claude Code MCP: registered in {mcp_result}")
+
     print("Restart your shell, then run: methodproof start")
 
 
@@ -177,6 +194,11 @@ def cmd_push(args: argparse.Namespace) -> None:
     push(sid, cfg["token"], cfg["api_url"])
 
 
+def cmd_mcp_serve(args: argparse.Namespace) -> None:
+    from methodproof.mcp import serve
+    serve()
+
+
 def _latest() -> str | None:
     sessions = store.list_sessions()
     return sessions[0]["id"] if sessions else None
@@ -215,11 +237,13 @@ def main() -> None:
     l.add_argument("--api-url")
     pu = sub.add_parser("push", help="Upload to platform")
     pu.add_argument("session_id", nargs="?")
+    sub.add_parser("mcp-serve", help="Run MCP server (used by Claude Code)")
 
     args = p.parse_args()
     cmds = {
         "init": cmd_init, "start": cmd_start, "stop": cmd_stop,
-        "view": cmd_view, "log": cmd_log, "login": cmd_login, "push": cmd_push,
+        "view": cmd_view, "log": cmd_log, "login": cmd_login,
+        "push": cmd_push, "mcp-serve": cmd_mcp_serve,
     }
     fn = cmds.get(args.cmd)
     if not fn:
