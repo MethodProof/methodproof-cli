@@ -77,7 +77,20 @@ def _run_consent(cfg: dict) -> dict:
     capture = cfg.get("capture", dict(config._DEFAULTS["capture"]))
     keys = list(config.CAPTURE_DESCRIPTIONS.keys())
 
-    print(f"\n{_banner()} — choose what to capture\n")
+    print(f"\n{_banner()}\n")
+    print("Built by engineers, for engineers.")
+    print()
+    print("We don't just write code — we each have a flow, a rhythm, a craft.")
+    print("MethodProof exists to make that visible. Every debug session, every")
+    print("refactor, every late-night breakthrough is part of your story.")
+    print()
+    print("Help us build the greatest tool for understanding how engineers")
+    print("actually work — not how we're told to work, but how we really do.")
+    print()
+    print("The more you share, the better the picture. Full Spectrum opt-in")
+    print("unlocks live streaming on the free tier so others can watch your")
+    print("process graph form in real-time. Your call, your data, your flow.")
+    print()
     print("All data stays local in ~/.methodproof/. Nothing leaves your")
     print("machine unless you explicitly run `methodproof push`.\n")
 
@@ -88,7 +101,9 @@ def _run_consent(cfg: dict) -> dict:
             print(f"  [{mark}] {i}. {key:<20s} {desc}")
 
         enabled = sum(1 for k in keys if capture.get(k, True))
-        print(f"\n  {enabled}/{len(keys)} categories enabled")
+        full = enabled == len(keys)
+        label = _rainbow("Full Spectrum") if full else f"{enabled}/{len(keys)} categories"
+        print(f"\n  {label} enabled")
         print("  Toggle: enter number | a = all on | n = all off | done = confirm\n")
 
         choice = input("  > ").strip().lower()
@@ -112,6 +127,13 @@ def _run_consent(cfg: dict) -> dict:
 
     cfg["capture"] = capture
     cfg["consent_acknowledged"] = True
+
+    is_full = all(capture.get(k, True) for k in keys)
+    if is_full:
+        print(f"\n  {_rainbow('Full Spectrum')} — live streaming unlocked on free tier.")
+    else:
+        print(f"\n  {enabled}/{len(keys)} categories. Enable all for free live streaming.")
+
     return cfg
 
 
