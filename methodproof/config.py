@@ -25,6 +25,7 @@ _DEFAULTS: dict[str, Any] = {
         "ai_prompts": True,
         "ai_responses": True,
         "browser": True,
+        "music": True,
     },
 }
 
@@ -39,6 +40,7 @@ CAPTURE_DESCRIPTIONS: dict[str, str] = {
     "ai_prompts": "Text you send to AI tools (Claude Code, OpenClaw, codex, etc.)",
     "ai_responses": "Text AI tools respond with, including tool calls",
     "browser": "Page visits, tab switches, searches, copy events (via extension)",
+    "music": "Now Playing track and artist (Spotify, Apple Music, etc.)",
 }
 
 

@@ -243,6 +243,11 @@ def cmd_start(args: argparse.Namespace) -> None:
         from methodproof import bridge
         threads.append(threading.Thread(target=bridge.start, args=(sid, stop_event, 9877), daemon=True))
 
+    # Music — if music category enabled
+    if capture.get("music", True):
+        from methodproof.agents import music
+        threads.append(threading.Thread(target=music.start, args=(stop_event,), daemon=True))
+
     for t in threads:
         t.start()
 
