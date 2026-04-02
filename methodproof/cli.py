@@ -8,6 +8,7 @@ Usage:
     methodproof log               List local sessions
     methodproof tag <id> <tags>   Tag a session (comma-separated)
     methodproof publish [id]      Set public visibility and push
+    methodproof review [id]       Review session data before pushing
     methodproof login             Connect to MethodProof platform
     methodproof push [id]         Upload session to platform
 """
@@ -480,6 +481,39 @@ def cmd_delete(args: argparse.Namespace) -> None:
         print(f"Session not found: {sid[:8]}")
 
 
+def cmd_review(args: argparse.Namespace) -> None:
+    """Show exactly what a session contains before pushing."""
+    session = _resolve_session(args.session_id)
+    events = store.get_events(session["id"])
+    if not events:
+        print("No events in this session.")
+        return
+
+    print(f"\n{_banner()} — review before push\n")
+    print(f"Session:  {session['id'][:8]}")
+    print(f"Duration: {_duration(session)}")
+    synced = "yes" if session["synced"] else "no"
+    print(f"Synced:   {synced}")
+    print(f"Events:   {len(events)}\n")
+
+    # Group by type
+    by_type: dict[str, list[dict]] = {}
+    for e in events:
+        by_type.setdefault(e["type"], []).append(e)
+
+    for etype, items in sorted(by_type.items(), key=lambda x: -len(x[1])):
+        print(f"  {etype:<30s} {len(items):>4} events")
+        # Show sample metadata fields from first event
+        meta = json.loads(items[0]["metadata"])
+        fields = ", ".join(meta.keys())
+        if fields:
+            print(f"    fields: {fields}")
+
+    print(f"\nTotal: {len(events)} events across {len(by_type)} types.")
+    print("No source code or diff content is captured.")
+    print("Run `methodproof push` to upload, or `methodproof delete` to remove.\n")
+
+
 def cmd_mcp_serve(args: argparse.Namespace) -> None:
     from methodproof.mcp import serve
     serve()
@@ -536,6 +570,8 @@ def main() -> None:
     dl = sub.add_parser("delete", help="Delete a session and all its data")
     dl.add_argument("session_id", help="Session ID (prefix ok)")
     dl.add_argument("--force", "-f", action="store_true", help="Skip confirmation")
+    rv = sub.add_parser("review", help="Review session data before pushing")
+    rv.add_argument("session_id", nargs="?")
     sub.add_parser("consent", help="Review or change capture categories")
     sub.add_parser("mcp-serve", help="Run MCP server (used by Claude Code)")
 
@@ -544,7 +580,7 @@ def main() -> None:
         "init": cmd_init, "start": cmd_start, "stop": cmd_stop,
         "view": cmd_view, "log": cmd_log, "login": cmd_login,
         "push": cmd_push, "tag": cmd_tag, "publish": cmd_publish,
-        "delete": cmd_delete, "consent": cmd_consent,
+        "delete": cmd_delete, "review": cmd_review, "consent": cmd_consent,
         "mcp-serve": cmd_mcp_serve,
     }
     fn = cmds.get(args.cmd)

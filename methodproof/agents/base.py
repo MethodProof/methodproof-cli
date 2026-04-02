@@ -49,7 +49,6 @@ _EVENT_GATES: dict[str, str] = {
 # Maps capture categories to (event_type, field_to_strip) for field-level gating
 _FIELD_GATES: dict[str, tuple[str, str]] = {
     "command_output": ("terminal_cmd", "output_snippet"),
-    "git_diffs": ("file_edit", "diff"),
 }
 
 

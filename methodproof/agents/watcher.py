@@ -11,31 +11,28 @@ from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from methodproof.agents import base
-from methodproof.agents.terminal import SENSITIVE
 
 IGNORE_PATTERNS = re.compile(
     r"(__pycache__|\.pyc|\.git/|node_modules|\.DS_Store|\.swp|~$)"
 )
 
-# Files likely to contain secrets — capture metadata only, not diff content
-_SECRET_FILES = re.compile(r"(\.env|credentials|secret|\.pem|\.key|id_rsa)", re.IGNORECASE)
 
-
-def _git_diff(repo: str, path: str) -> tuple[int, int, str]:
-    """Run git diff for a file, return (added, removed, diff_text)."""
+def _git_diff_stats(repo: str, path: str) -> tuple[int, int]:
+    """Run git diff --stat for a file, return (lines_added, lines_removed)."""
     try:
         result = subprocess.run(
-            ["git", "-C", repo, "diff", "--", path],
+            ["git", "-C", repo, "diff", "--numstat", "--", path],
             capture_output=True, text=True, timeout=5,
         )
-        diff = result.stdout
-        if not diff:
-            return 0, 0, ""
-        added = sum(1 for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++"))
-        removed = sum(1 for l in diff.splitlines() if l.startswith("-") and not l.startswith("---"))
-        return added, removed, diff[:2000]
+        line = result.stdout.strip()
+        if not line:
+            return 0, 0
+        parts = line.split("\t")
+        added = int(parts[0]) if parts[0] != "-" else 0
+        removed = int(parts[1]) if parts[1] != "-" else 0
+        return added, removed
     except Exception:
-        return 0, 0, ""
+        return 0, 0
 
 
 class _Handler(FileSystemEventHandler):
@@ -71,14 +68,11 @@ class _Handler(FileSystemEventHandler):
             return
         self._hashes[path] = h
 
-        added, removed, diff_text = _git_diff(self._root, path)
-        # Redact diffs for secret files or diffs containing sensitive patterns
-        if _SECRET_FILES.search(path) or (diff_text and SENSITIVE.search(diff_text)):
-            diff_text = "[redacted — contains sensitive content]"
+        added, removed = _git_diff_stats(self._root, path)
+        lang = Path(event.src_path).suffix.lstrip(".")
         base.emit("file_edit", {
-            "path": path, "diff": diff_text,
+            "path": path, "language": lang,
             "lines_added": added, "lines_removed": removed,
-            "is_ai_generated": False,
         })
 
     def on_deleted(self, event: FileSystemEvent) -> None:
