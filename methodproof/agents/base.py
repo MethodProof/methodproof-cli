@@ -18,6 +18,7 @@ _lock = threading.Lock()
 _buffer: list[dict[str, Any]] = []
 _FLUSH_SIZE = 50
 _MAX_RETRIES = 3
+_prev_hash = "genesis"
 
 # Maps event types to the capture category that gates them
 _EVENT_GATES: dict[str, str] = {
@@ -53,10 +54,11 @@ _FIELD_GATES: dict[str, tuple[str, str]] = {
 
 
 def init(session_id: str, live: bool = False) -> None:
-    global _session_id, _initialized, _e2e_key, _capture, _live_mode
+    global _session_id, _initialized, _e2e_key, _capture, _live_mode, _prev_hash
     _session_id = session_id
     _initialized = True
     _live_mode = live
+    _prev_hash = "genesis"
     from methodproof import config
     cfg = config.load()
     raw = cfg.get("e2e_key", "")
@@ -93,6 +95,10 @@ def emit(event_type: str, metadata: dict[str, Any]) -> None:
     if _e2e_key:
         from methodproof.crypto import encrypt_metadata
         entry["metadata"] = encrypt_metadata(dict(entry["metadata"]), _e2e_key)
+    global _prev_hash
+    from methodproof.integrity import compute_event_hash
+    entry["_chain_hash"] = compute_event_hash(entry, _prev_hash)
+    _prev_hash = entry["_chain_hash"]
     if _live_mode:
         from methodproof import live as live_mod
         live_mod.send(entry)
@@ -111,9 +117,12 @@ def _flush_locked() -> None:
     if not _buffer:
         return
     batch = list(_buffer)
+    hashes = [(e["id"], e.pop("_chain_hash")) for e in batch if "_chain_hash" in e]
     for attempt in range(_MAX_RETRIES):
         try:
             store.insert_events(_session_id, batch)
+            if hashes:
+                store.insert_event_hashes(hashes)
             _buffer.clear()
             return
         except Exception as exc:

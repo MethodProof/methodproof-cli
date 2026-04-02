@@ -207,6 +207,18 @@ def cmd_init(args: argparse.Namespace) -> None:
     else:
         print("AI hooks: skipped (ai_prompts and ai_responses disabled)")
 
+    # Signing keypair for attestation
+    from methodproof.integrity import has_keypair
+    if not has_keypair():
+        try:
+            from methodproof.integrity import generate_keypair
+            pub = generate_keypair()
+            print(f"Signing key: generated ({len(pub)} bytes)")
+        except ImportError:
+            print("Signing key: skipped (install methodproof[signing])")
+    else:
+        print("Signing key: exists")
+
     print(f"\n{_banner()}")
     print("Restart your shell, then run: methodproof start")
 

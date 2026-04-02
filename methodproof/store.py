@@ -84,7 +84,7 @@ def init_db() -> None:
 
 
 def _migrate() -> None:
-    """Add columns for existing databases that predate repo/tags/visibility."""
+    """Add columns/tables for existing databases."""
     db = _db()
     cols = {r[1] for r in db.execute("PRAGMA table_info(sessions)").fetchall()}
     for col, default in [("repo_url", None), ("tags", "'[]'"), ("visibility", "'private'")]:
@@ -93,6 +93,11 @@ def _migrate() -> None:
             if default:
                 ddl += f" DEFAULT {default}"
             db.execute(ddl)
+    # Hash chain table
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS event_hashes "
+        "(event_id TEXT PRIMARY KEY REFERENCES events(id), hash TEXT NOT NULL)"
+    )
     db.commit()
 
 
@@ -236,6 +241,7 @@ def delete_session(session_id: str) -> bool:
     exists = db.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone()
     if not exists:
         return False
+    db.execute("DELETE FROM event_hashes WHERE event_id IN (SELECT id FROM events WHERE session_id = ?)", (session_id,))
     db.execute("DELETE FROM action_artifacts WHERE action_id IN (SELECT id FROM events WHERE session_id = ?)", (session_id,))
     db.execute("DELETE FROM action_resources WHERE action_id IN (SELECT id FROM events WHERE session_id = ?)", (session_id,))
     db.execute("DELETE FROM causal_links WHERE source_id IN (SELECT id FROM events WHERE session_id = ?)", (session_id,))
@@ -244,6 +250,23 @@ def delete_session(session_id: str) -> bool:
     db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     db.commit()
     return True
+
+
+def insert_event_hashes(hashes: list[tuple[str, str]]) -> None:
+    _db().executemany(
+        "INSERT OR IGNORE INTO event_hashes (event_id, hash) VALUES (?, ?)", hashes,
+    )
+    _db().commit()
+
+
+def get_event_hashes(session_id: str) -> list[dict[str, str]]:
+    rows = _db().execute(
+        "SELECT eh.event_id, eh.hash FROM event_hashes eh "
+        "JOIN events e ON e.id = eh.event_id "
+        "WHERE e.session_id = ? ORDER BY e.timestamp",
+        (session_id,),
+    ).fetchall()
+    return [{"event_id": r["event_id"], "hash": r["hash"]} for r in rows]
 
 
 def mark_synced(session_id: str, remote_id: str) -> None:

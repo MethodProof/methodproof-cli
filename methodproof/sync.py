@@ -62,21 +62,54 @@ def push(session_id: str, token: str, api_url: str) -> None:
     remote_id = result["session_id"]
     print(f"done ({remote_id[:8]})")
 
-    # Upload events in batches
+    # Upload events in batches (with hash chain if available)
     events = store.get_events(session_id)
+    event_hashes = store.get_event_hashes(session_id)
+    hash_lookup = {h["event_id"]: h["hash"] for h in event_hashes}
     total = len(events)
     for i in range(0, total, 100):
         batch = events[i:i + 100]
         payload = [{"id": e["id"], "type": e["type"],
                      "timestamp": _iso(e["timestamp"]),
+                     "timestamp_raw": e["timestamp"],
                      "duration_ms": int(e["duration_ms"]),
-                     "metadata": json.loads(e["metadata"])}
+                     "metadata": json.loads(e["metadata"]),
+                     "hash": hash_lookup.get(e["id"], "")}
                     for e in batch]
         _request("POST", f"/sessions/{remote_id}/events", api_url, token,
                  {"events": payload})
         done = min(i + 100, total)
         print(f"\r  Uploading: {done}/{total} events", end="", flush=True)
     print()
+
+    # Attestation (if signing key available)
+    from methodproof.integrity import has_keypair
+    if has_keypair() and event_hashes:
+        try:
+            import hashlib as _hl
+            from methodproof.integrity import sign_attestation, compute_binary_hash, get_public_key_pem
+            from methodproof import __version__
+            root_hash = event_hashes[0]["hash"]
+            leaf_hash = event_hashes[-1]["hash"]
+            binary_hash = compute_binary_hash()
+            signature = sign_attestation(
+                session_id, root_hash, leaf_hash, total, __version__, binary_hash,
+            )
+            pub_pem = get_public_key_pem().decode()
+            fp = _hl.sha256(pub_pem.encode()).hexdigest()
+            try:
+                _request("POST", "/personal/signing-keys", api_url, token,
+                         {"public_key_pem": pub_pem, "fingerprint": fp})
+            except SystemExit:
+                pass  # 409 = already registered
+            _request("POST", f"/sessions/{remote_id}/attestation", api_url, token, {
+                "session_id": session_id, "root_hash": root_hash, "leaf_hash": leaf_hash,
+                "event_count": total, "cli_version": __version__, "binary_hash": binary_hash,
+                "signature": signature, "key_fingerprint": fp,
+            })
+            print(f"  Attestation: signed ({fp[:8]})")
+        except ImportError:
+            pass  # cryptography not installed
 
     # Complete
     _request("PUT", f"/personal/sessions/{remote_id}/complete", api_url, token)
