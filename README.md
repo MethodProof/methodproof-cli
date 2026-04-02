@@ -120,6 +120,26 @@ For self-hosted instances:
 methodproof login --api-url https://mp.company.com/api
 ```
 
+## Integrity Verification
+
+MethodProof uses a multi-layer integrity system to ensure session data has not been tampered with.
+
+**Hash-chained events:** Every event emitted during a session includes a SHA-256 hash linking it to the previous event, forming a verifiable chain. Hashes are computed at emit time and stored in `event_hashes` in the local database. Any gap or modification breaks the chain and is detectable on the platform via `GET /sessions/{id}/chain/verify`.
+
+**Ed25519 attestation on push:** When you run `methodproof push`, the CLI signs a summary of the session (event count, first/last hash, duration) with your Ed25519 private key. The platform stores the signed attestation and exposes it via `GET /sessions/{id}/integrity`. Reviewers can verify the session was pushed by the key holder without modification.
+
+**Binary hash self-reporting:** On each push, the CLI reports its own binary hash to the platform. The platform compares this against known release hashes published via `GET /cli/releases` to detect modified or unofficial builds.
+
+### Signing Key
+
+A signing key is generated automatically during `methodproof init`. To enable Ed25519 signing, install the signing extra:
+
+```bash
+pip install methodproof[signing]
+```
+
+The private key is stored in `~/.methodproof/config.json` (`chmod 600`). The corresponding public key is registered with the platform on first push via `POST /personal/signing-keys`.
+
 ## Integrations
 
 `methodproof init` automatically installs hooks for detected tools:
