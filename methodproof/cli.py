@@ -217,9 +217,27 @@ def cmd_start(args: argparse.Namespace) -> None:
     PIDFILE.write_text(str(os.getpid()))
 
     from methodproof.agents import base
-    base.init(sid)
-    stop_event = threading.Event()
+    live_ok = False
     capture = cfg.get("capture", {})
+
+    if args.live:
+        if not cfg.get("token"):
+            print("Live mode requires login. Run `methodproof login` first.")
+            sys.exit(1)
+        # Create remote session first
+        from methodproof.sync import _request
+        result = _request("POST", "/personal/sessions", cfg["api_url"], cfg["token"])
+        remote_id = result["session_id"]
+        store.mark_synced(sid, remote_id)
+        # Connect live WebSocket
+        from methodproof import live as live_mod
+        live_ok = live_mod.start(cfg["api_url"], cfg["token"], remote_id, capture)
+        if not live_ok:
+            print("Live stream rejected — requires Pro plan or full-spectrum consent.")
+            sys.exit(1)
+
+    base.init(sid, live=live_ok)
+    stop_event = threading.Event()
 
     threads: list[threading.Thread] = []
 
@@ -260,10 +278,15 @@ def cmd_start(args: argparse.Namespace) -> None:
     print(f"Capture:   {', '.join(active)}")
     if capture.get("browser", True):
         print(f"Bridge:    http://localhost:9877")
+    if live_ok:
+        print(f"Live:      streaming to {cfg['api_url']}")
     print("Press Ctrl+C or run `methodproof stop` to finish.")
 
     def _shutdown(sig: int, frame: object) -> None:
         stop_event.set()
+        if live_ok:
+            from methodproof import live as live_mod
+            live_mod.stop()
         base.flush()
         store.complete_session(sid)
         stats = graph.build(sid)
@@ -473,6 +496,7 @@ def main() -> None:
     s.add_argument("--repo", help="Git remote URL (overrides auto-detect)")
     s.add_argument("--public", action="store_true", help="Set visibility to public")
     s.add_argument("--tags", help="Comma-separated tags")
+    s.add_argument("--live", action="store_true", help="Stream events live to platform")
     sub.add_parser("stop", help="Stop recording")
     v = sub.add_parser("view", help="View session graph")
     v.add_argument("session_id", nargs="?")

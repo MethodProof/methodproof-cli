@@ -13,6 +13,7 @@ _session_id = ""
 _initialized = False
 _e2e_key: bytes | None = None
 _capture: dict[str, bool] = {}
+_live_mode = False
 _lock = threading.Lock()
 _buffer: list[dict[str, Any]] = []
 _FLUSH_SIZE = 50
@@ -52,10 +53,11 @@ _FIELD_GATES: dict[str, tuple[str, str]] = {
 }
 
 
-def init(session_id: str) -> None:
-    global _session_id, _initialized, _e2e_key, _capture
+def init(session_id: str, live: bool = False) -> None:
+    global _session_id, _initialized, _e2e_key, _capture, _live_mode
     _session_id = session_id
     _initialized = True
+    _live_mode = live
     from methodproof import config
     cfg = config.load()
     raw = cfg.get("e2e_key", "")
@@ -92,6 +94,9 @@ def emit(event_type: str, metadata: dict[str, Any]) -> None:
     if _e2e_key:
         from methodproof.crypto import encrypt_metadata
         entry["metadata"] = encrypt_metadata(dict(entry["metadata"]), _e2e_key)
+    if _live_mode:
+        from methodproof import live as live_mod
+        live_mod.send(entry)
     with _lock:
         _buffer.append(entry)
         if len(_buffer) >= _FLUSH_SIZE:

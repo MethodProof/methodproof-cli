@@ -7,6 +7,7 @@ dependencies = ["watchdog>=4.0"]
 
 [project.optional-dependencies]
 e2e = ["cryptography>=43.0"]
+live = ["websocket-client>=1.7"]
 license = {text = "Proprietary"}
 readme = "README.md"
 
