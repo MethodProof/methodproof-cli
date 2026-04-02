@@ -93,6 +93,9 @@ def _process(line: str) -> None:
     exit_code = entry.get("exit_code", 0)
     duration = entry.get("duration_ms", 0)
     output = entry.get("output", "")[:500]
+    # Redact output if it contains secrets
+    if SENSITIVE.search(output):
+        output = "[redacted — contains sensitive content]"
 
     base.emit("terminal_cmd", {
         "command": command, "exit_code": exit_code,

@@ -14,6 +14,31 @@ _DEFAULTS: dict[str, Any] = {
     "token": "",
     "email": "",
     "active_session": None,
+    "e2e_key": "",
+    "capture": {
+        "terminal_commands": True,
+        "command_output": True,
+        "test_results": True,
+        "file_changes": True,
+        "git_diffs": True,
+        "git_commits": True,
+        "ai_prompts": True,
+        "ai_responses": True,
+        "browser": True,
+    },
+}
+
+# Descriptions shown during interactive consent
+CAPTURE_DESCRIPTIONS: dict[str, str] = {
+    "terminal_commands": "Commands you run and their exit codes",
+    "command_output": "First 500 chars of command output (secrets auto-filtered)",
+    "test_results": "Pass/fail counts from pytest, jest, go test, cargo test",
+    "file_changes": "File create, edit, and delete events with paths and sizes",
+    "git_diffs": "Diff content of file changes (secrets auto-redacted)",
+    "git_commits": "Commit hashes, messages, and changed file lists",
+    "ai_prompts": "Text you send to AI tools (Claude Code, OpenClaw, codex, etc.)",
+    "ai_responses": "Text AI tools respond with, including tool calls",
+    "browser": "Page visits, tab switches, searches, copy events (via extension)",
 }
 
 

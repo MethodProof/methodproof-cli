@@ -11,10 +11,14 @@ from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from methodproof.agents import base
+from methodproof.agents.terminal import SENSITIVE
 
 IGNORE_PATTERNS = re.compile(
     r"(__pycache__|\.pyc|\.git/|node_modules|\.DS_Store|\.swp|~$)"
 )
+
+# Files likely to contain secrets — capture metadata only, not diff content
+_SECRET_FILES = re.compile(r"(\.env|credentials|secret|\.pem|\.key|id_rsa)", re.IGNORECASE)
 
 
 def _git_diff(repo: str, path: str) -> tuple[int, int, str]:
@@ -68,6 +72,9 @@ class _Handler(FileSystemEventHandler):
         self._hashes[path] = h
 
         added, removed, diff_text = _git_diff(self._root, path)
+        # Redact diffs for secret files or diffs containing sensitive patterns
+        if _SECRET_FILES.search(path) or (diff_text and SENSITIVE.search(diff_text)):
+            diff_text = "[redacted — contains sensitive content]"
         base.emit("file_edit", {
             "path": path, "diff": diff_text,
             "lines_added": added, "lines_removed": removed,

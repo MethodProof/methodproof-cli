@@ -67,7 +67,9 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _cors(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self.headers.get("Origin", "")
+        allowed = origin.startswith("chrome-extension://") or origin.startswith("http://localhost")
+        self.send_header("Access-Control-Allow-Origin", origin if allowed else "http://localhost:9877")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 

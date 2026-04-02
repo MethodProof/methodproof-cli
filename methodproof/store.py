@@ -1,6 +1,7 @@
 """SQLite store — sessions, events, graph relationships."""
 
 import json
+import os
 import sqlite3
 import time
 import uuid
@@ -74,6 +75,11 @@ def _db() -> sqlite3.Connection:
 def init_db() -> None:
     config.ensure_dirs()
     _db().executescript(_SCHEMA)
+    # Restrict DB file to owner-only (matches config.json permissions)
+    try:
+        os.chmod(config.DB_PATH, 0o600)
+    except OSError:
+        pass
     _migrate()
 
 
@@ -222,6 +228,22 @@ def update_visibility(session_id: str, visibility: str) -> None:
         (visibility, session_id),
     )
     _db().commit()
+
+
+def delete_session(session_id: str) -> bool:
+    """Delete a session and all its related data."""
+    db = _db()
+    exists = db.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    if not exists:
+        return False
+    db.execute("DELETE FROM action_artifacts WHERE action_id IN (SELECT id FROM events WHERE session_id = ?)", (session_id,))
+    db.execute("DELETE FROM action_resources WHERE action_id IN (SELECT id FROM events WHERE session_id = ?)", (session_id,))
+    db.execute("DELETE FROM causal_links WHERE source_id IN (SELECT id FROM events WHERE session_id = ?)", (session_id,))
+    db.execute("DELETE FROM next_chain WHERE from_id IN (SELECT id FROM events WHERE session_id = ?)", (session_id,))
+    db.execute("DELETE FROM events WHERE session_id = ?", (session_id,))
+    db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+    db.commit()
+    return True
 
 
 def mark_synced(session_id: str, remote_id: str) -> None:

@@ -27,47 +27,173 @@ from methodproof import config, store, graph, hook, repos
 
 PIDFILE = config.DIR / "methodproof.pid"
 
+_RAINBOW = [
+    "\033[91m",       # red
+    "\033[38;5;208m", # orange
+    "\033[93m",       # yellow
+    "\033[92m",       # green
+    "\033[96m",       # cyan
+    "\033[94m",       # blue
+    "\033[95m",       # magenta
+]
+_RESET = "\033[0m"
+
+
+def _rainbow(text: str) -> str:
+    if not sys.stdout.isatty():
+        return text
+    chars = []
+    ci = 0
+    for ch in text:
+        if ch == " ":
+            chars.append(ch)
+        else:
+            chars.append(f"{_RAINBOW[ci % len(_RAINBOW)]}{ch}")
+            ci += 1
+    return "".join(chars) + _RESET
+
+
+def _banner() -> str:
+    return f"MethodProof — {_rainbow('Full Spectrum')}"
+
+
+_ALIAS_MARKER = "# methodproof-alias"
+_ALIAS_LINE = '\n# methodproof-alias\nalias mp="methodproof"\n'
+
+
+def _install_alias() -> None:
+    """Add `alias mp=methodproof` to the user's shell rc file."""
+    shell = os.environ.get("SHELL", "/bin/bash")
+    from pathlib import Path
+    rc = Path.home() / (".zshrc" if "zsh" in shell else ".bashrc")
+    if rc.exists() and _ALIAS_MARKER in rc.read_text():
+        return
+    with rc.open("a") as f:
+        f.write(_ALIAS_LINE)
+
+
+def _run_consent(cfg: dict) -> dict:
+    """Interactive capture category selection. Returns updated config."""
+    capture = cfg.get("capture", dict(config._DEFAULTS["capture"]))
+    keys = list(config.CAPTURE_DESCRIPTIONS.keys())
+
+    print(f"\n{_banner()} — choose what to capture\n")
+    print("All data stays local in ~/.methodproof/. Nothing leaves your")
+    print("machine unless you explicitly run `methodproof push`.\n")
+
+    while True:
+        for i, key in enumerate(keys, 1):
+            mark = "x" if capture.get(key, True) else " "
+            desc = config.CAPTURE_DESCRIPTIONS[key]
+            print(f"  [{mark}] {i}. {key:<20s} {desc}")
+
+        enabled = sum(1 for k in keys if capture.get(k, True))
+        print(f"\n  {enabled}/{len(keys)} categories enabled")
+        print("  Toggle: enter number | a = all on | n = all off | done = confirm\n")
+
+        choice = input("  > ").strip().lower()
+        if choice in ("done", "d", ""):
+            if enabled == 0:
+                print("  At least one category must be enabled.\n")
+                continue
+            break
+        elif choice == "a":
+            for k in keys:
+                capture[k] = True
+        elif choice == "n":
+            for k in keys:
+                capture[k] = False
+        elif choice.isdigit() and 1 <= int(choice) <= len(keys):
+            k = keys[int(choice) - 1]
+            capture[k] = not capture.get(k, True)
+        else:
+            print(f"  Unknown input: {choice}\n")
+        print()
+
+    cfg["capture"] = capture
+    cfg["consent_acknowledged"] = True
+    return cfg
+
 
 def cmd_init(args: argparse.Namespace) -> None:
     config.ensure_dirs()
+    cfg = config.load()
+    if not cfg.get("consent_acknowledged"):
+        cfg = _run_consent(cfg)
+        config.save(cfg)
+        print()
+
+    capture = cfg.get("capture", {})
     store.init_db()
-    rc = hook.install()
-    print(f"Shell hook: {rc}")
 
-    from methodproof.hooks.install import install as install_claude_hooks
-    result = install_claude_hooks()
-    if result is None:
-        print("Claude Code: not found (hooks skipped)")
+    # Offer mp alias
+    if not cfg.get("alias_offered"):
+        answer = input("Install `mp` as a shorthand alias? [Y/n]: ").strip().lower()
+        cfg["alias_offered"] = True
+        if answer != "n":
+            _install_alias()
+            cfg["alias_installed"] = True
+            print("Alias: mp -> methodproof")
+        else:
+            print("Alias: skipped")
+        config.save(cfg)
+
+    # Shell hook — needed for terminal commands
+    if capture.get("terminal_commands", True):
+        rc = hook.install()
+        print(f"Shell hook: {rc}")
     else:
-        print(f"Claude Code hooks: {result}")
+        print("Shell hook: skipped (terminal_commands disabled)")
 
-    from methodproof.mcp import register_with_claude
-    mcp_result = register_with_claude()
-    if mcp_result is None:
-        print("Claude Code: MCP server not registered (skipped)")
-    elif mcp_result == "already registered":
-        print("Claude Code MCP: already registered")
+    # AI hooks — only install if ai_prompts or ai_responses enabled
+    ai_enabled = capture.get("ai_prompts", True) or capture.get("ai_responses", True)
+
+    if ai_enabled:
+        from methodproof.hooks.install import install as install_claude_hooks
+        result = install_claude_hooks()
+        if result is None:
+            print("Claude Code: not found (hooks skipped)")
+        else:
+            print(f"Claude Code hooks: {result}")
+
+        from methodproof.mcp import register_with_claude
+        mcp_result = register_with_claude()
+        if mcp_result is None:
+            print("Claude Code: MCP server not registered (skipped)")
+        elif mcp_result == "already registered":
+            print("Claude Code MCP: already registered")
+        else:
+            print(f"Claude Code MCP: registered in {mcp_result}")
+
+        from methodproof.hooks.wrappers import install as install_wrappers
+        wrapped = install_wrappers()
+        if wrapped:
+            print(f"AI CLI wrappers: {', '.join(wrapped)}")
+        else:
+            print("AI CLI wrappers: no tools found (codex, gemini, aider)")
+
+        from methodproof.hooks.openclaw_install import install as install_openclaw_hooks, install_skill
+        oc_result = install_openclaw_hooks()
+        if oc_result is None:
+            print("OpenClaw: not found (hooks + skill skipped)")
+        else:
+            print(f"OpenClaw hooks: {oc_result}")
+            skill_result = install_skill()
+            if skill_result:
+                print(f"OpenClaw skill: {skill_result}")
     else:
-        print(f"Claude Code MCP: registered in {mcp_result}")
+        print("AI hooks: skipped (ai_prompts and ai_responses disabled)")
 
-    from methodproof.hooks.wrappers import install as install_wrappers
-    wrapped = install_wrappers()
-    if wrapped:
-        print(f"AI CLI wrappers: {', '.join(wrapped)}")
-    else:
-        print("AI CLI wrappers: no tools found (codex, gemini, aider)")
-
-    from methodproof.hooks.openclaw_install import install as install_openclaw_hooks, install_skill
-    oc_result = install_openclaw_hooks()
-    if oc_result is None:
-        print("OpenClaw: not found (hooks + skill skipped)")
-    else:
-        print(f"OpenClaw hooks: {oc_result}")
-        skill_result = install_skill()
-        if skill_result:
-            print(f"OpenClaw skill: {skill_result}")
-
+    print(f"\n{_banner()}")
     print("Restart your shell, then run: methodproof start")
+
+
+def cmd_consent(args: argparse.Namespace) -> None:
+    """Review or change capture categories."""
+    cfg = config.load()
+    cfg = _run_consent(cfg)
+    config.save(cfg)
+    print(f"\n{_banner()} — capture settings saved.")
 
 
 def cmd_start(args: argparse.Namespace) -> None:
@@ -90,24 +216,45 @@ def cmd_start(args: argparse.Namespace) -> None:
     config.save(cfg)
     PIDFILE.write_text(str(os.getpid()))
 
-    from methodproof.agents import base, watcher, terminal
-    from methodproof import bridge
+    from methodproof.agents import base
     base.init(sid)
     stop_event = threading.Event()
+    capture = cfg.get("capture", {})
 
-    threads = [
-        threading.Thread(target=watcher.start, args=(watch_dir, stop_event), daemon=True),
-        threading.Thread(target=terminal.start, args=(stop_event,), daemon=True),
-        threading.Thread(target=bridge.start, args=(sid, stop_event, 9877), daemon=True),
-    ]
+    threads: list[threading.Thread] = []
+
+    # File watcher — if any file/git category is enabled
+    files_enabled = (
+        capture.get("file_changes", True)
+        or capture.get("git_diffs", True)
+        or capture.get("git_commits", True)
+    )
+    if files_enabled:
+        from methodproof.agents import watcher
+        threads.append(threading.Thread(target=watcher.start, args=(watch_dir, stop_event), daemon=True))
+
+    # Terminal monitor — if terminal or test categories enabled
+    if capture.get("terminal_commands", True) or capture.get("test_results", True):
+        from methodproof.agents import terminal
+        threads.append(threading.Thread(target=terminal.start, args=(stop_event,), daemon=True))
+
+    # Bridge — if browser category enabled
+    if capture.get("browser", True):
+        from methodproof import bridge
+        threads.append(threading.Thread(target=bridge.start, args=(sid, stop_event, 9877), daemon=True))
+
     for t in threads:
         t.start()
 
+    active = [k for k, v in capture.items() if v]
+    print(f"\n{_banner()}")
     print(f"Recording: {sid[:8]}")
     print(f"Watching:  {watch_dir}")
     if repo_url:
         print(f"Repo:      {repo_url}")
-    print(f"Bridge:    http://localhost:9877")
+    print(f"Capture:   {', '.join(active)}")
+    if capture.get("browser", True):
+        print(f"Bridge:    http://localhost:9877")
     print("Press Ctrl+C or run `methodproof stop` to finish.")
 
     def _shutdown(sig: int, frame: object) -> None:
@@ -269,6 +416,20 @@ def _resolve_session(session_id: str) -> dict:
     return session
 
 
+def cmd_delete(args: argparse.Namespace) -> None:
+    session = _resolve_session(args.session_id)
+    sid = session["id"]
+    if not args.force:
+        answer = input(f"Delete session {sid[:8]} and all its data? [y/N]: ").strip().lower()
+        if answer != "y":
+            print("Aborted.")
+            return
+    if store.delete_session(sid):
+        print(f"Deleted: {sid[:8]}")
+    else:
+        print(f"Session not found: {sid[:8]}")
+
+
 def cmd_mcp_serve(args: argparse.Namespace) -> None:
     from methodproof.mcp import serve
     serve()
@@ -289,15 +450,16 @@ def _duration(s: dict) -> str:
 def _print_summary(session: dict | None, stats: dict) -> None:
     if not session:
         return
-    print(f"\nSession: {session['id'][:8]}")
-    print(f"  Events:  {session['total_events']}")
+    print(f"\n{_banner()}")
+    print(f"Session:  {session['id'][:8]}")
+    print(f"  Events:   {session['total_events']}")
     print(f"  Duration: {_duration(session)}")
-    print(f"  Graph:   {stats['next']} links, {stats['causal']} causal")
+    print(f"  Graph:    {stats['next']} links, {stats['causal']} causal")
     print(f"\nRun `methodproof view` to explore.")
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(prog="methodproof", description="See how you code")
+    p = argparse.ArgumentParser(prog="methodproof", description=_banner())
     sub = p.add_subparsers(dest="cmd")
 
     sub.add_parser("init", help="Install shell hook")
@@ -320,6 +482,10 @@ def main() -> None:
     tg.add_argument("tags", help="Comma-separated tags")
     pb = sub.add_parser("publish", help="Set public and push")
     pb.add_argument("session_id", nargs="?")
+    dl = sub.add_parser("delete", help="Delete a session and all its data")
+    dl.add_argument("session_id", help="Session ID (prefix ok)")
+    dl.add_argument("--force", "-f", action="store_true", help="Skip confirmation")
+    sub.add_parser("consent", help="Review or change capture categories")
     sub.add_parser("mcp-serve", help="Run MCP server (used by Claude Code)")
 
     args = p.parse_args()
@@ -327,6 +493,7 @@ def main() -> None:
         "init": cmd_init, "start": cmd_start, "stop": cmd_stop,
         "view": cmd_view, "log": cmd_log, "login": cmd_login,
         "push": cmd_push, "tag": cmd_tag, "publish": cmd_publish,
+        "delete": cmd_delete, "consent": cmd_consent,
         "mcp-serve": cmd_mcp_serve,
     }
     fn = cmds.get(args.cmd)
