@@ -1,6 +1,9 @@
 """~/.methodproof/ directory and config.json management."""
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +28,7 @@ _DEFAULTS: dict[str, Any] = {
         "ai_responses": True,
         "browser": True,
         "music": True,
+        "code_capture": False,
     },
 }
 
@@ -35,15 +39,32 @@ CAPTURE_DESCRIPTIONS: dict[str, str] = {
     "test_results": "Pass/fail counts from pytest, jest, go test, cargo test",
     "file_changes": "File create, edit, and delete events with paths and line counts",
     "git_commits": "Commit hashes, messages, and changed file lists",
-    "ai_prompts": "Text you send to AI tools (Claude Code, OpenClaw, codex, etc.)",
-    "ai_responses": "Text AI tools respond with, including tool calls",
+    "ai_prompts": "Text you send to AI agents (Claude Code, codex, aider, etc.) — captured as AI Agent Graph nodes",
+    "ai_responses": "AI agent responses, tool calls, and results — captured as AI Agent Graph edges",
     "browser": "Page visits, tab switches, searches, copy events (via extension)",
     "music": "Now Playing track and artist (Spotify, Apple Music, etc.)",
+    "code_capture": "Full file diffs and git patches (Pro only, encrypted, private by default)",
 }
 
 
 def ensure_dirs() -> None:
     DIR.mkdir(exist_ok=True)
+
+
+def secure_file(path: Path) -> None:
+    """Best-effort owner-only permissions. Uses icacls on Windows, chmod on Unix."""
+    if sys.platform == "win32":
+        try:
+            username = os.environ.get("USERNAME", "")
+            if username:
+                subprocess.run(
+                    ["icacls", str(path), "/inheritance:r", "/grant:r", f"{username}:F"],
+                    capture_output=True, timeout=5,
+                )
+        except Exception:
+            pass
+    else:
+        path.chmod(0o600)
 
 
 def load() -> dict[str, Any]:
@@ -55,4 +76,4 @@ def load() -> dict[str, Any]:
 def save(cfg: dict[str, Any]) -> None:
     ensure_dirs()
     CONFIG.write_text(json.dumps(cfg, indent=2) + "\n")
-    CONFIG.chmod(0o600)
+    secure_file(CONFIG)

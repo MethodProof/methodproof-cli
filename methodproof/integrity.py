@@ -38,10 +38,10 @@ def generate_keypair() -> bytes:
     priv_path = d / "signing.key"
     pub_path = d / "signing.pub"
     priv_path.write_bytes(key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()))
-    priv_path.chmod(0o600)
+    from methodproof.config import secure_file
+    secure_file(priv_path)
     pub_bytes = key.public_key().public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
     pub_path.write_bytes(pub_bytes)
-    pub_path.chmod(0o644)
     return pub_bytes
 
 

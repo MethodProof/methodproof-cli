@@ -2,11 +2,14 @@
 
 import json
 import shutil
+import sys
 from pathlib import Path
 
 CLAUDE_DIR = Path.home() / ".claude"
 SETTINGS_FILE = CLAUDE_DIR / "settings.json"
-HOOK_SCRIPT = Path(__file__).parent / "claude_code.sh"
+_HOOK_SH = Path(__file__).parent / "claude_code.sh"
+_HOOK_PY = Path(__file__).parent / "claude_code.py"
+HOOK_SCRIPT = _HOOK_PY if sys.platform == "win32" else _HOOK_SH
 
 HOOK_EVENTS = [
     "UserPromptSubmit", "PreToolUse", "PostToolUse",
@@ -21,7 +24,11 @@ def install() -> str | None:
         return None
 
     CLAUDE_DIR.mkdir(exist_ok=True)
-    script = str(HOOK_SCRIPT)
+    # On Windows, invoke via python; on Unix, use the shell script directly
+    if sys.platform == "win32":
+        script = f"{sys.executable} {HOOK_SCRIPT}"
+    else:
+        script = str(HOOK_SCRIPT)
 
     # Load existing settings (backup before modifying)
     settings: dict = {}

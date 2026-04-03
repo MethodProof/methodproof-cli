@@ -7,11 +7,10 @@ The wrappers call the real binary (resolved at install time via `which`)
 so there's no infinite recursion.
 """
 
-import os
 import shutil
-from pathlib import Path
+import sys
 
-from methodproof.config import DIR
+from methodproof.hook import get_shell_rc
 
 MARKER = "# methodproof-ai-wrappers"
 
@@ -22,7 +21,7 @@ TOOLS = [
     ("aider", "aider"),
 ]
 
-_WRAPPER_TEMPLATE = '''
+_WRAPPER_TEMPLATE_UNIX = '''
 _mp_{name}() {{
   local real="{binary}"
   local prompt="$*"
@@ -50,13 +49,35 @@ _mp_{name}() {{
 }}
 '''
 
+_WRAPPER_TEMPLATE_PS = '''
+function _mp_{name} {{
+    $real = "{binary}"
+    $prompt = $args -join ' '
+    $tsStart = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    try {{
+        $preview = $prompt.Substring(0, [Math]::Min(200, $prompt.Length)) -replace '"','\\"'
+        $body = '{{"events":[{{"type":"ai_cli_start","timestamp":' + $tsStart + ',"metadata":{{"tool":"{name}","prompt_preview":"' + $preview + '","prompt_length":' + $prompt.Length + '}}}}]}}'
+        Invoke-RestMethod -Uri http://localhost:9877/events -Method Post -Body $body -ContentType 'application/json' -TimeoutSec 1 -ErrorAction SilentlyContinue | Out-Null
+    }} catch {{}}
+    & $real @args
+    $ec = $LASTEXITCODE
+    $tsEnd = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $dur = ($tsEnd - $tsStart) * 1000
+    try {{
+        $bodyEnd = '{{"events":[{{"type":"ai_cli_end","timestamp":' + $tsEnd + ',"metadata":{{"tool":"{name}","exit_code":' + $ec + ',"duration_ms":' + $dur + '}}}}]}}'
+        Invoke-RestMethod -Uri http://localhost:9877/events -Method Post -Body $bodyEnd -ContentType 'application/json' -TimeoutSec 1 -ErrorAction SilentlyContinue | Out-Null
+    }} catch {{}}
+    return $ec
+}}
+'''
+
 
 def install() -> list[str]:
     """Install AI CLI wrappers into the user's shell rc file. Returns list of wrapped tools."""
-    shell = os.environ.get("SHELL", "/bin/bash")
-    rc = Path.home() / (".zshrc" if "zsh" in shell else ".bashrc")
+    rc, _ = get_shell_rc()
+    is_windows = sys.platform == "win32"
+    template = _WRAPPER_TEMPLATE_PS if is_windows else _WRAPPER_TEMPLATE_UNIX
 
-    # Check which tools exist
     available: list[tuple[str, str]] = []
     for name, binary in TOOLS:
         real_path = shutil.which(binary)
@@ -69,17 +90,18 @@ def install() -> list[str]:
     # Build wrapper block
     block_lines = [MARKER]
     for name, binary in available:
-        wrapper = _WRAPPER_TEMPLATE.format(name=name, binary=binary)
-        block_lines.append(wrapper)
-        # Alias the function name to shadow the binary
-        block_lines.append(f"alias {name}='_mp_{name}'")
+        block_lines.append(template.format(name=name, binary=binary))
+        if is_windows:
+            block_lines.append(f"Set-Alias {name} _mp_{name}")
+        else:
+            block_lines.append(f"alias {name}='_mp_{name}'")
     block_lines.append(f"# end {MARKER}")
     block = "\n".join(block_lines)
 
-    # Check if already installed
     if rc.exists() and MARKER in rc.read_text():
         return [name for name, _ in available]
 
+    rc.parent.mkdir(parents=True, exist_ok=True)
     with rc.open("a") as f:
         f.write("\n" + block + "\n")
 
@@ -87,6 +109,5 @@ def install() -> list[str]:
 
 
 def is_installed() -> bool:
-    shell = os.environ.get("SHELL", "/bin/bash")
-    rc = Path.home() / (".zshrc" if "zsh" in shell else ".bashrc")
+    rc, _ = get_shell_rc()
     return rc.exists() and MARKER in rc.read_text()

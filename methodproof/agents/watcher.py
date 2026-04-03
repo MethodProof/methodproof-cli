@@ -17,6 +17,9 @@ IGNORE_PATTERNS = re.compile(
 )
 
 
+_MAX_DIFF_BYTES = 50_000
+
+
 def _git_diff_stats(repo: str, path: str) -> tuple[int, int]:
     """Run git diff --stat for a file, return (lines_added, lines_removed)."""
     try:
@@ -33,6 +36,30 @@ def _git_diff_stats(repo: str, path: str) -> tuple[int, int]:
         return added, removed
     except Exception:
         return 0, 0
+
+
+def _git_diff_content(repo: str, path: str) -> str:
+    """Get full diff content for a file, capped at 50KB."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", repo, "diff", "--", path],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.stdout[:_MAX_DIFF_BYTES]
+    except Exception:
+        return ""
+
+
+def _git_show_diff(repo: str, sha: str) -> str:
+    """Get full diff for a commit, capped at 50KB."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", repo, "show", "--format=", sha],
+            capture_output=True, text=True, timeout=10,
+        )
+        return result.stdout[:_MAX_DIFF_BYTES]
+    except Exception:
+        return ""
 
 
 class _Handler(FileSystemEventHandler):
@@ -70,10 +97,14 @@ class _Handler(FileSystemEventHandler):
 
         added, removed = _git_diff_stats(self._root, path)
         lang = Path(event.src_path).suffix.lstrip(".")
-        base.emit("file_edit", {
+        meta: dict[str, object] = {
             "path": path, "language": lang,
             "lines_added": added, "lines_removed": removed,
-        })
+        }
+        diff = _git_diff_content(self._root, path)
+        if diff:
+            meta["diff"] = diff
+        base.emit("file_edit", meta)
 
     def on_deleted(self, event: FileSystemEvent) -> None:
         if event.is_directory or IGNORE_PATTERNS.search(event.src_path):
@@ -115,7 +146,11 @@ def _log_commit(watch_dir: str, sha: str) -> None:
         ).stdout.strip().splitlines()
     except Exception:
         msg, files = "", []
-    base.emit("git_commit", {"hash": sha[:7], "message": msg, "files_changed": files})
+    meta: dict[str, object] = {"hash": sha[:7], "message": msg, "files_changed": files}
+    diff = _git_show_diff(watch_dir, sha)
+    if diff:
+        meta["diff"] = diff
+    base.emit("git_commit", meta)
 
 
 def start(watch_dir: str, stop: threading.Event) -> None:

@@ -1,7 +1,6 @@
 """SQLite store — sessions, events, graph relationships."""
 
 import json
-import os
 import sqlite3
 import time
 import uuid
@@ -75,11 +74,7 @@ def _db() -> sqlite3.Connection:
 def init_db() -> None:
     config.ensure_dirs()
     _db().executescript(_SCHEMA)
-    # Restrict DB file to owner-only (matches config.json permissions)
-    try:
-        os.chmod(config.DB_PATH, 0o600)
-    except OSError:
-        pass
+    config.secure_file(config.DB_PATH)
     _migrate()
 
 

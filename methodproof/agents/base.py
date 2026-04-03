@@ -47,9 +47,12 @@ _EVENT_GATES: dict[str, str] = {
     "music_playing": "music",
 }
 
-# Maps capture categories to (event_type, field_to_strip) for field-level gating
-_FIELD_GATES: dict[str, tuple[str, str]] = {
-    "command_output": ("terminal_cmd", "output_snippet"),
+# Maps capture categories to (event_type, field) pairs for field-level gating.
+# When the category is disabled, these fields are stripped from emitted events.
+# When enabled (code_capture), these fields are populated by the agent.
+_FIELD_GATES: dict[str, list[tuple[str, str]]] = {
+    "command_output": [("terminal_cmd", "output_snippet")],
+    "code_capture": [("file_edit", "diff"), ("git_commit", "diff")],
 }
 
 
@@ -80,9 +83,10 @@ def emit(event_type: str, metadata: dict[str, Any]) -> None:
     if gate and not _capture.get(gate, True):
         return
     # Field-level consent gate — strip opted-out fields
-    for category, (etype, field) in _FIELD_GATES.items():
-        if event_type == etype and not _capture.get(category, True):
-            metadata.pop(field, None)
+    for category, pairs in _FIELD_GATES.items():
+        for etype, field in pairs:
+            if event_type == etype and not _capture.get(category, True):
+                metadata.pop(field, None)
 
     entry = {
         "id": uuid.uuid4().hex,

@@ -1,4 +1,4 @@
-"""Install MethodProof hook and skill into OpenClaw."""
+"""Install MethodProof AI Agent Graph hook and skill into Claude Code."""
 
 import json
 import shutil
@@ -31,7 +31,7 @@ def _save_config(cfg: dict) -> None:
 
 
 def install() -> str | None:
-    """Install MethodProof hook into OpenClaw. Returns None if OpenClaw not found."""
+    """Install AI Agent Graph hook into Claude Code. Returns None if not found."""
     if not _has_openclaw():
         return None
 
@@ -65,7 +65,7 @@ def is_installed() -> bool:
 
 
 def install_skill() -> str | None:
-    """Install MethodProof skill into OpenClaw. Returns None if OpenClaw not found."""
+    """Install AI Agent Graph skill into Claude Code. Returns None if not found."""
     if not _has_openclaw():
         return None
 

@@ -59,18 +59,18 @@ def _banner() -> str:
 
 
 _ALIAS_MARKER = "# methodproof-alias"
-_ALIAS_LINE = '\n# methodproof-alias\nalias mp="methodproof"\n'
 
 
 def _install_alias() -> None:
     """Add `alias mp=methodproof` to the user's shell rc file."""
-    shell = os.environ.get("SHELL", "/bin/bash")
-    from pathlib import Path
-    rc = Path.home() / (".zshrc" if "zsh" in shell else ".bashrc")
+    rc, _ = hook.get_shell_rc()
     if rc.exists() and _ALIAS_MARKER in rc.read_text():
         return
+    rc.parent.mkdir(parents=True, exist_ok=True)
+    alias = '\n# methodproof-alias\nSet-Alias mp methodproof\n' if sys.platform == "win32" \
+        else '\n# methodproof-alias\nalias mp="methodproof"\n'
     with rc.open("a") as f:
-        f.write(_ALIAS_LINE)
+        f.write(alias)
 
 
 def _run_consent(cfg: dict) -> dict:
@@ -198,12 +198,12 @@ def cmd_init(args: argparse.Namespace) -> None:
         from methodproof.hooks.openclaw_install import install as install_openclaw_hooks, install_skill
         oc_result = install_openclaw_hooks()
         if oc_result is None:
-            print("OpenClaw: not found (hooks + skill skipped)")
+            print("AI Agent Graph: Claude Code not found (hooks + skill skipped)")
         else:
-            print(f"OpenClaw hooks: {oc_result}")
+            print(f"AI Agent Graph hooks: {oc_result}")
             skill_result = install_skill()
             if skill_result:
-                print(f"OpenClaw skill: {skill_result}")
+                print(f"AI Agent Graph skill: {skill_result}")
     else:
         print("AI hooks: skipped (ai_prompts and ai_responses disabled)")
 
@@ -334,9 +334,15 @@ def cmd_start(args: argparse.Namespace) -> None:
         sys.exit(0)
 
     signal.signal(signal.SIGINT, _shutdown)
-    signal.signal(signal.SIGTERM, _shutdown)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, _shutdown)
 
+    stopfile = config.DIR / "methodproof.stop"
     while not stop_event.is_set():
+        # Windows: check for stop sentinel since SIGTERM doesn't work
+        if sys.platform == "win32" and stopfile.exists():
+            stopfile.unlink(missing_ok=True)
+            _shutdown(0, None)
         time.sleep(5)
         base.flush()
 
@@ -352,11 +358,21 @@ def cmd_stop(args: argparse.Namespace) -> None:
     if PIDFILE.exists():
         try:
             pid = int(PIDFILE.read_text().strip())
-            os.kill(pid, signal.SIGTERM)
-            print(f"Stopping session {sid[:8]}...")
-            time.sleep(3)
+            if sys.platform == "win32":
+                # Windows: write stop sentinel — the start loop checks for it
+                stopfile = config.DIR / "methodproof.stop"
+                stopfile.write_text(str(pid))
+                print(f"Stopping session {sid[:8]}...")
+                for _ in range(10):
+                    time.sleep(0.5)
+                    if not PIDFILE.exists():
+                        break
+            else:
+                os.kill(pid, signal.SIGTERM)
+                print(f"Stopping session {sid[:8]}...")
+                time.sleep(3)
             return
-        except (ProcessLookupError, ValueError):
+        except (ProcessLookupError, ValueError, OSError):
             PIDFILE.unlink(missing_ok=True)
 
     # Fallback: start process is gone, complete directly
