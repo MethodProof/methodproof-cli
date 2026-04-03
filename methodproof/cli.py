@@ -1,20 +1,19 @@
-"""MethodProof CLI — see how you code.
+"""MethodProof CLI. See how you code.
 
 Usage:
-    methodproof init              Install shell hook, create data directory
-    methodproof start [--dir .] [--repo URL] [--tags t1,t2] [--public]
+    methodproof init              Install hooks, configure capture + research + redaction
+    methodproof start [--dir .]   Start recording a session
     methodproof stop              Stop recording, build process graph
     methodproof view [id]         View session graph in browser
     methodproof log               List local sessions
-    methodproof tag <id> <tags>   Tag a session (comma-separated)
-    methodproof publish [id]      Set public visibility and push
     methodproof review [id]       Review session data before pushing
-    methodproof login             Connect to MethodProof platform
-    methodproof push [id]         Upload session to platform
+    methodproof login             Connect to platform (opens browser)
+    methodproof push [id]         Upload privately to your account
+    methodproof publish [id]      Make session public (applies redaction defaults)
+    methodproof consent           Review or change capture, research, and redaction settings
 """
 
 import argparse
-import getpass
 import json
 import os
 import signal
@@ -74,67 +73,134 @@ def _install_alias() -> None:
 
 
 def _run_consent(cfg: dict) -> dict:
-    """Interactive capture category selection. Returns updated config."""
+    """Interactive consent flow with three sections: capture, research, redaction."""
     capture = cfg.get("capture", dict(config._DEFAULTS["capture"]))
-    keys = list(config.CAPTURE_DESCRIPTIONS.keys())
+    publish_redact = cfg.get("publish_redact", dict(config._DEFAULTS["publish_redact"]))
+    std = config.STANDARD_CATEGORIES
 
     print(f"\n{_banner()}\n")
-    print("Built by engineers, for engineers.")
-    print()
-    print("We don't just write code — we each have a flow, a rhythm, a craft.")
-    print("MethodProof exists to make that visible. Every debug session, every")
-    print("refactor, every late-night breakthrough is part of your story.")
-    print()
-    print("Help us build the greatest tool for understanding how engineers")
-    print("actually work — not how we're told to work, but how we really do.")
-    print()
-    print("The more you share, the better the picture. Full Spectrum opt-in")
-    print("unlocks live streaming on the free tier so others can watch your")
-    print("process graph form in real-time. Your call, your data, your flow.")
-    print()
+    print("Built by engineers, for engineers.\n")
     print("All data stays local in ~/.methodproof/. Nothing leaves your")
-    print("machine unless you explicitly run `methodproof push`.\n")
+    print("machine unless you explicitly run `mp push` or `mp publish`.\n")
+
+    # --- Section 1: Capture ---
+    print("=" * 60)
+    print("  SECTION 1: What gets recorded locally")
+    print("=" * 60)
+    print()
+    print("  These 9 categories are structural metadata only.")
+    print("  Enable all 9 to unlock free live streaming.\n")
 
     while True:
-        for i, key in enumerate(keys, 1):
+        for i, key in enumerate(std, 1):
             mark = "x" if capture.get(key, True) else " "
             desc = config.CAPTURE_DESCRIPTIONS[key]
             print(f"  [{mark}] {i}. {key:<20s} {desc}")
 
-        enabled = sum(1 for k in keys if capture.get(k, True))
-        full = enabled == len(keys)
-        label = _rainbow("Full Spectrum") if full else f"{enabled}/{len(keys)} categories"
-        print(f"\n  {label} enabled")
-        print("  Toggle: enter number | a = all on | n = all off | done = confirm\n")
+        std_enabled = sum(1 for k in std if capture.get(k, True))
+        is_full = std_enabled == len(std)
+        label = _rainbow("Full Spectrum") if is_full else f"{std_enabled}/{len(std)} categories"
+        print(f"\n  {label} enabled", end="")
+        if is_full:
+            print("  |  Free live streaming unlocked")
+        else:
+            print(f"  |  Enable all 9 for free live streaming")
+
+        # Code capture (separate, premium)
+        cc_mark = "x" if capture.get("code_capture", False) else " "
+        print(f"\n  [{cc_mark}] 0. {'code_capture':<20s} {config.CAPTURE_DESCRIPTIONS['code_capture']}")
+
+        print("\n  Toggle: enter number (0 for code capture) | a = all 9 on | n = all off | done = confirm\n")
 
         choice = input("  > ").strip().lower()
         if choice in ("done", "d", ""):
-            if enabled == 0:
+            if std_enabled == 0:
                 print("  At least one category must be enabled.\n")
                 continue
             break
         elif choice == "a":
-            for k in keys:
+            for k in std:
                 capture[k] = True
         elif choice == "n":
-            for k in keys:
+            for k in std:
                 capture[k] = False
-        elif choice.isdigit() and 1 <= int(choice) <= len(keys):
-            k = keys[int(choice) - 1]
+        elif choice == "0":
+            capture["code_capture"] = not capture.get("code_capture", False)
+        elif choice.isdigit() and 1 <= int(choice) <= len(std):
+            k = std[int(choice) - 1]
             capture[k] = not capture.get(k, True)
         else:
             print(f"  Unknown input: {choice}\n")
         print()
 
     cfg["capture"] = capture
-    cfg["consent_acknowledged"] = True
 
-    is_full = all(capture.get(k, True) for k in keys)
     if is_full:
-        print(f"\n  {_rainbow('Full Spectrum')} — live streaming unlocked on free tier.")
-    else:
-        print(f"\n  {enabled}/{len(keys)} categories. Enable all for free live streaming.")
+        print(f"\n  {_rainbow('Full Spectrum')} unlocked.\n")
 
+    # --- Section 2: Research Data ---
+    print("=" * 60)
+    print("  SECTION 2: Contribute to AI research (optional)")
+    print("=" * 60)
+    print()
+
+    if not is_full:
+        print("  Research contribution requires all 9 standard categories enabled.")
+        print("  You can enable this later via `methodproof consent`.\n")
+        cfg["research_consent"] = False
+    else:
+        print("  Opt in to contribute anonymized, aggregated process patterns")
+        print("  to improve AI developer tools and engineering research.")
+        print()
+        print("  What gets shared: action types, durations, tool selections,")
+        print("  behavioral patterns, and scores.")
+        print("  What never leaves: your code, prompts, company IP.")
+        print()
+        print("  This consent is separate from capture. You can withdraw anytime.")
+        print("  Your data is stripped of all identifying information before export.\n")
+
+        choice = input("  Contribute to research? [y/N]: ").strip().lower()
+        cfg["research_consent"] = choice in ("y", "yes")
+        if cfg["research_consent"]:
+            print("  Research contribution enabled. Thank you.\n")
+        else:
+            print("  No problem. You can opt in anytime via `methodproof consent`.\n")
+
+    # --- Section 3: Publish Redaction ---
+    print("=" * 60)
+    print("  SECTION 3: Default redactions for public sessions")
+    print("=" * 60)
+    print()
+    print("  `mp push` uploads privately to your account (nothing public).")
+    print("  `mp publish` makes a session public. These defaults control")
+    print("  what gets redacted from public views.\n")
+
+    redactable = [
+        ("command_output", "Terminal output (first 500 chars)"),
+        ("ai_prompts", "AI prompt text"),
+        ("ai_responses", "AI response text"),
+        ("code_capture", "File diffs and git patches"),
+    ]
+
+    while True:
+        for i, (key, desc) in enumerate(redactable, 1):
+            mark = "x" if publish_redact.get(key, True) else " "
+            print(f"  [{mark}] {i}. Redact: {desc}")
+
+        print("\n  Checked = redacted from public view. Toggle: number | done = confirm\n")
+
+        choice = input("  > ").strip().lower()
+        if choice in ("done", "d", ""):
+            break
+        elif choice.isdigit() and 1 <= int(choice) <= len(redactable):
+            k = redactable[int(choice) - 1][0]
+            publish_redact[k] = not publish_redact.get(k, True)
+        else:
+            print(f"  Unknown input: {choice}\n")
+        print()
+
+    cfg["publish_redact"] = publish_redact
+    cfg["consent_acknowledged"] = True
     return cfg
 
 
@@ -220,15 +286,158 @@ def cmd_init(args: argparse.Namespace) -> None:
         print("Signing key: exists")
 
     print(f"\n{_banner()}")
-    print("Restart your shell, then run: methodproof start")
+    print("Restart your shell, then run: methodproof start\n")
+    _print_commands()
+
+
+def _print_commands() -> None:
+    """Print color coded command reference."""
+    if not sys.stdout.isatty():
+        _print_commands_plain()
+        return
+
+    _W = "\033[97m"   # white/bold
+    _G = "\033[92m"   # green
+    _C = "\033[96m"   # cyan
+    _Y = "\033[93m"   # yellow
+    _M = "\033[95m"   # magenta
+    _D = "\033[90m"   # dim
+    R = _RESET
+
+    print(f"  {_W}RECORD{R}")
+    print(f"    {_G}mp start{R}              Start recording a session")
+    print(f"    {_G}mp stop{R}               Stop recording, build process graph")
+    print(f"    {_G}mp start --live{R}        Stream your graph in real time")
+    print()
+    print(f"  {_W}REVIEW{R}")
+    print(f"    {_C}mp view{R}  {_D}[id]{R}          View session graph in browser")
+    print(f"    {_C}mp review{R} {_D}[id]{R}         Inspect session data before pushing")
+    print(f"    {_C}mp log{R}                List all local sessions")
+    print()
+    print(f"  {_W}SHARE{R}")
+    print(f"    {_Y}mp push{R}  {_D}[id]{R}          Upload privately to your account")
+    print(f"    {_Y}mp publish{R} {_D}[id]{R}        Make session public (redaction applied)")
+    print(f"    {_Y}mp tag{R} {_D}<id> <tags>{R}     Tag a session")
+    print()
+    print(f"  {_W}ACCOUNT{R}")
+    print(f"    {_M}mp login{R}              Connect to platform (opens browser)")
+    print(f"    {_M}mp consent{R}            Change capture, research, and redaction settings")
+    print(f"    {_M}mp delete{R} {_D}<id>{R}        Delete a session and all its data")
+    print(f"    {_M}mp uninstall{R}           Remove all hooks, data, and config")
+    print()
+    print(f"  {_D}To view this at any time run: mp help{R}\n")
+
+
+def _print_commands_plain() -> None:
+    print("  RECORD")
+    print("    mp start              Start recording a session")
+    print("    mp stop               Stop recording, build process graph")
+    print("    mp start --live       Stream your graph in real time")
+    print()
+    print("  REVIEW")
+    print("    mp view  [id]         View session graph in browser")
+    print("    mp review [id]        Inspect session data before pushing")
+    print("    mp log                List all local sessions")
+    print()
+    print("  SHARE")
+    print("    mp push  [id]         Upload privately to your account")
+    print("    mp publish [id]       Make session public (redaction applied)")
+    print("    mp tag <id> <tags>    Tag a session")
+    print()
+    print("  ACCOUNT")
+    print("    mp login              Connect to platform (opens browser)")
+    print("    mp consent            Change capture, research, and redaction settings")
+    print("    mp delete <id>        Delete a session and all its data")
+    print("    mp uninstall          Remove all hooks, data, and config")
+    print()
+    print("  To view this at any time run: mp help\n")
+
+
+def cmd_uninstall(args: argparse.Namespace) -> None:
+    """Remove all MethodProof hooks, data, and config."""
+    import shutil
+
+    if not args.force:
+        sessions = store.list_sessions()
+        unsynced = [s for s in sessions if not s["synced"]]
+        if unsynced:
+            print(f"  Warning: {len(unsynced)} session(s) not pushed to platform.")
+        answer = input("\n  Remove all MethodProof data and hooks? [y/N]: ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("  Cancelled.")
+            return
+
+    removed = []
+
+    # Shell hook
+    rc, _ = hook.get_shell_rc()
+    if rc.exists():
+        text = rc.read_text()
+        if hook.MARKER in text:
+            lines = text.split("\n")
+            clean = []
+            skip = False
+            for line in lines:
+                if hook.MARKER in line:
+                    skip = True
+                    continue
+                if skip and line.strip() == "":
+                    skip = False
+                    continue
+                if skip:
+                    continue
+                clean.append(line)
+            rc.write_text("\n".join(clean))
+            removed.append(f"Shell hook from {rc}")
+
+        # mp alias
+        if _ALIAS_MARKER in rc.read_text():
+            text = rc.read_text()
+            lines = text.split("\n")
+            clean = [l for l in lines if _ALIAS_MARKER not in l and "alias mp=" not in l and "Set-Alias mp" not in l]
+            rc.write_text("\n".join(clean))
+            removed.append(f"mp alias from {rc}")
+
+    # Claude Code hooks
+    claude_dir = Path.home() / ".claude"
+    for p in [
+        claude_dir / "hooks" / "methodproof",
+        claude_dir / "skills" / "methodproof",
+    ]:
+        if p.exists():
+            shutil.rmtree(p)
+            removed.append(str(p))
+
+    # OpenClaw hooks
+    openclaw_dir = Path.home() / ".openclaw"
+    for p in [
+        openclaw_dir / "hooks" / "methodproof",
+        openclaw_dir / "skills" / "methodproof",
+    ]:
+        if p.exists():
+            shutil.rmtree(p)
+            removed.append(str(p))
+
+    # Data directory
+    if config.DIR.exists():
+        shutil.rmtree(config.DIR)
+        removed.append(str(config.DIR))
+
+    if removed:
+        print("\n  Removed:")
+        for r in removed:
+            print(f"    {r}")
+    print("\n  To remove the CLI itself: pip uninstall methodproof")
+    print("  Restart your shell to clear hooks.\n")
 
 
 def cmd_consent(args: argparse.Namespace) -> None:
-    """Review or change capture categories."""
+    """Review or change capture, research, and redaction settings."""
     cfg = config.load()
     cfg = _run_consent(cfg)
     config.save(cfg)
-    print(f"\n{_banner()} — capture settings saved.")
+    print(f"\n{_banner()} settings saved.\n")
+    _print_commands()
 
 
 def cmd_start(args: argparse.Namespace) -> None:
@@ -416,27 +625,40 @@ def cmd_log(args: argparse.Namespace) -> None:
 
 
 def cmd_login(args: argparse.Namespace) -> None:
-    email = input("Email: ").strip()
-    password = getpass.getpass("Password: ")
-    action = input("Login or Register? [l/r]: ").strip().lower()
-
+    import webbrowser
     from methodproof.sync import _request
+
     cfg = config.load()
     api = args.api_url or cfg["api_url"]
 
-    if action.startswith("r"):
-        result = _request("POST", "/personal/register", api, "",
-                          {"email": email, "password": password})
-        print("Registered.")
-    else:
-        result = _request("POST", "/auth/login", api, "",
-                          {"email": email, "password": password})
-        print("Logged in.")
+    # Start device auth flow
+    result = _request("POST", "/auth/cli/start", api, "")
+    code = result["code"]
+    auth_url = result["auth_url"]
 
-    cfg["token"] = result["token"]
-    cfg["email"] = email
-    cfg["api_url"] = api
-    config.save(cfg)
+    print(f"\nOpening browser to sign in...\n")
+    print(f"  {auth_url}\n")
+    print("If the browser doesn't open, copy the URL above.\n")
+    webbrowser.open(auth_url)
+
+    # Poll until approved or expired
+    print("Waiting for authorization...", end="", flush=True)
+    for _ in range(60):
+        time.sleep(2)
+        try:
+            poll = _request("GET", f"/auth/cli/poll?code={code}", api, "")
+            if poll.get("status") == "complete":
+                cfg["token"] = poll["token"]
+                cfg["api_url"] = api
+                config.save(cfg)
+                print(" done.\n")
+                print("Logged in. Run `methodproof push` to upload sessions.")
+                return
+        except Exception:
+            pass
+        print(".", end="", flush=True)
+
+    print("\n\nAuthorization timed out. Run `methodproof login` to try again.")
 
 
 def cmd_push(args: argparse.Namespace) -> None:
@@ -450,6 +672,7 @@ def cmd_push(args: argparse.Namespace) -> None:
         sys.exit(1)
     from methodproof.sync import push
     push(sid, cfg["token"], cfg["api_url"])
+    print(f"Pushed {sid[:8]} (private). Use `mp publish` to make public.")
 
 
 def cmd_tag(args: argparse.Namespace) -> None:
@@ -467,6 +690,14 @@ def cmd_publish(args: argparse.Namespace) -> None:
         print("Run `methodproof login` first.")
         sys.exit(1)
     session = _resolve_session(args.session_id)
+
+    # Show what will be redacted
+    redact = cfg.get("publish_redact", config._DEFAULTS["publish_redact"])
+    redacted = [k for k, v in redact.items() if v]
+    if redacted:
+        print(f"  Redacting from public view: {', '.join(redacted)}")
+        print(f"  Change defaults with `methodproof consent`\n")
+
     store.update_visibility(session["id"], "public")
     session["visibility"] = "public"
     if not session["synced"]:
@@ -475,7 +706,7 @@ def cmd_publish(args: argparse.Namespace) -> None:
     else:
         from methodproof.sync import sync_metadata
         sync_metadata(session, cfg["token"], cfg["api_url"])
-    print(f"Published: {session['id'][:8]}")
+    print(f"Published {session['id'][:8]} (public).")
 
 
 def _resolve_session(session_id: str) -> dict:
@@ -588,19 +819,22 @@ def main() -> None:
     sub.add_parser("log", help="List sessions")
     l = sub.add_parser("login", help="Connect to platform")
     l.add_argument("--api-url")
-    pu = sub.add_parser("push", help="Upload to platform")
+    pu = sub.add_parser("push", help="Upload privately to your account")
     pu.add_argument("session_id", nargs="?")
     tg = sub.add_parser("tag", help="Tag a session")
     tg.add_argument("session_id", help="Session ID (prefix ok)")
     tg.add_argument("tags", help="Comma-separated tags")
-    pb = sub.add_parser("publish", help="Set public and push")
+    pb = sub.add_parser("publish", help="Make session public (applies redaction defaults)")
     pb.add_argument("session_id", nargs="?")
     dl = sub.add_parser("delete", help="Delete a session and all its data")
     dl.add_argument("session_id", help="Session ID (prefix ok)")
     dl.add_argument("--force", "-f", action="store_true", help="Skip confirmation")
     rv = sub.add_parser("review", help="Review session data before pushing")
     rv.add_argument("session_id", nargs="?")
-    sub.add_parser("consent", help="Review or change capture categories")
+    sub.add_parser("consent", help="Change capture, research, and redaction settings")
+    un = sub.add_parser("uninstall", help="Remove all hooks, data, and config")
+    un.add_argument("--force", "-f", action="store_true", help="Skip confirmation")
+    sub.add_parser("help", help="Show command reference")
     sub.add_parser("mcp-serve", help="Run MCP server (used by Claude Code)")
 
     args = p.parse_args()
@@ -609,12 +843,14 @@ def main() -> None:
         "view": cmd_view, "log": cmd_log, "login": cmd_login,
         "push": cmd_push, "tag": cmd_tag, "publish": cmd_publish,
         "delete": cmd_delete, "review": cmd_review, "consent": cmd_consent,
+        "uninstall": cmd_uninstall, "help": lambda _: _print_commands(),
         "mcp-serve": cmd_mcp_serve,
     }
     fn = cmds.get(args.cmd)
     if not fn:
-        p.print_help()
+        _print_commands()
         sys.exit(1)
 
-    store.init_db()
+    if args.cmd != "help":
+        store.init_db()
     fn(args)

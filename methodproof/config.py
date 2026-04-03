@@ -30,17 +30,30 @@ _DEFAULTS: dict[str, Any] = {
         "music": True,
         "code_capture": False,
     },
+    "research_consent": False,
+    "publish_redact": {
+        "command_output": True,
+        "ai_prompts": True,
+        "ai_responses": True,
+        "code_capture": True,
+    },
 }
+
+# The 9 standard categories (excludes code_capture)
+STANDARD_CATEGORIES = [
+    "terminal_commands", "command_output", "test_results", "file_changes",
+    "git_commits", "ai_prompts", "ai_responses", "browser", "music",
+]
 
 # Descriptions shown during interactive consent
 CAPTURE_DESCRIPTIONS: dict[str, str] = {
     "terminal_commands": "Commands you run and their exit codes",
-    "command_output": "First 500 chars of command output (secrets auto-filtered)",
+    "command_output": "First 500 chars of command output (secrets auto filtered)",
     "test_results": "Pass/fail counts from pytest, jest, go test, cargo test",
     "file_changes": "File create, edit, and delete events with paths and line counts",
     "git_commits": "Commit hashes, messages, and changed file lists",
-    "ai_prompts": "Text you send to AI agents (Claude Code, codex, aider, etc.) — captured as AI Agent Graph nodes",
-    "ai_responses": "AI agent responses, tool calls, and results — captured as AI Agent Graph edges",
+    "ai_prompts": "Text you send to AI agents (Claude Code, codex, aider, etc.). Captured as AI Agent Graph nodes",
+    "ai_responses": "AI agent responses, tool calls, and results. Captured as AI Agent Graph edges",
     "browser": "Page visits, tab switches, searches, copy events (via extension)",
     "music": "Now Playing track and artist (Spotify, Apple Music, etc.)",
     "code_capture": "Full file diffs and git patches (Pro only, encrypted, private by default)",
