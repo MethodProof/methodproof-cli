@@ -323,6 +323,7 @@ def _print_commands() -> None:
     print(f"    {_M}mp login{R}              Connect to platform (opens browser)")
     print(f"    {_M}mp consent{R}            Change capture, research, and redaction settings")
     print(f"    {_M}mp delete{R} {_D}<id>{R}        Delete a session and all its data")
+    print(f"    {_M}mp update{R}              Update to the latest version")
     print(f"    {_M}mp uninstall{R}           Remove all hooks, data, and config")
     print()
     print(f"  {_D}To view this at any time run: mp help{R}\n")
@@ -348,6 +349,7 @@ def _print_commands_plain() -> None:
     print("    mp login              Connect to platform (opens browser)")
     print("    mp consent            Change capture, research, and redaction settings")
     print("    mp delete <id>        Delete a session and all its data")
+    print("    mp update             Update to the latest version")
     print("    mp uninstall          Remove all hooks, data, and config")
     print()
     print("  To view this at any time run: mp help\n")
@@ -773,6 +775,80 @@ def cmd_review(args: argparse.Namespace) -> None:
     print("Run `methodproof push` to upload, or `methodproof delete` to remove.\n")
 
 
+def cmd_update(args: argparse.Namespace) -> None:
+    latest = _check_pypi_version()
+    current = _get_current_version()
+    if not latest:
+        print("Could not reach PyPI. Try: pip install --upgrade methodproof")
+        return
+    if latest == current:
+        print(f"Already up to date (v{current}).")
+        return
+    print(f"Updating v{current} -> v{latest}...")
+    import subprocess as sp
+    result = sp.run(
+        [sys.executable, "-m", "pip", "install", "--upgrade", "methodproof"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        print(f"Updated to v{latest}.")
+    else:
+        print(f"Update failed. Try manually: pip install --upgrade methodproof")
+
+
+def _get_current_version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("methodproof")
+    except Exception:
+        return "0.0.0"
+
+
+def _check_pypi_version() -> str | None:
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            "https://pypi.org/pypi/methodproof/json",
+            headers={"Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read())
+            return data["info"]["version"]
+    except Exception:
+        return None
+
+
+def _update_check() -> None:
+    """Background version check. Runs once per day, prints notice if outdated."""
+    check_file = config.DIR / ".last_update_check"
+    now = time.time()
+
+    try:
+        if check_file.exists():
+            last = float(check_file.read_text().strip())
+            if now - last < 86400:
+                return
+    except Exception:
+        pass
+
+    def _check():
+        latest = _check_pypi_version()
+        current = _get_current_version()
+        try:
+            config.ensure_dirs()
+            check_file.write_text(str(now))
+        except Exception:
+            pass
+        if latest and latest != current:
+            sys.stderr.write(
+                f"\033[90m  Update available: v{current} -> v{latest}."
+                f" Run: mp update\033[0m\n"
+            )
+
+    t = threading.Thread(target=_check, daemon=True)
+    t.start()
+
+
 def cmd_mcp_serve(args: argparse.Namespace) -> None:
     from methodproof.mcp import serve
     serve()
@@ -832,6 +908,7 @@ def main() -> None:
     rv = sub.add_parser("review", help="Review session data before pushing")
     rv.add_argument("session_id", nargs="?")
     sub.add_parser("consent", help="Change capture, research, and redaction settings")
+    sub.add_parser("update", help="Update to the latest version from PyPI")
     un = sub.add_parser("uninstall", help="Remove all hooks, data, and config")
     un.add_argument("--force", "-f", action="store_true", help="Skip confirmation")
     sub.add_parser("help", help="Show command reference")
@@ -843,7 +920,8 @@ def main() -> None:
         "view": cmd_view, "log": cmd_log, "login": cmd_login,
         "push": cmd_push, "tag": cmd_tag, "publish": cmd_publish,
         "delete": cmd_delete, "review": cmd_review, "consent": cmd_consent,
-        "uninstall": cmd_uninstall, "help": lambda _: _print_commands(),
+        "update": cmd_update, "uninstall": cmd_uninstall,
+        "help": lambda _: _print_commands(),
         "mcp-serve": cmd_mcp_serve,
     }
     fn = cmds.get(args.cmd)
@@ -851,6 +929,10 @@ def main() -> None:
         _print_commands()
         sys.exit(1)
 
-    if args.cmd != "help":
+    # Background update check (once per day, non blocking)
+    if args.cmd not in ("help", "update", "uninstall", "mcp-serve"):
+        _update_check()
+
+    if args.cmd not in ("help", "update"):
         store.init_db()
     fn(args)
