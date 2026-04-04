@@ -41,7 +41,10 @@ methodproof view      # explore your session in the browser
 ## Features
 
 - **Process graph** — D3 interactive visualization of your entire session as a knowledge graph
-- **Granular consent** — 9 capture categories, each independently toggled. Nothing records without your opt-in
+- **Prompt analysis** — 35 structural metadata dimensions extracted from every AI prompt (intent, cognitive level, specificity, context dependency) — no content stored
+- **Environment profiling** — structural analysis of your AI dev environment (instruction files, tool counts, MCP servers) captured at session start
+- **Outcome metrics** — first-shot apply rate, follow-up sequences, phase transitions computed at session end
+- **Granular consent** — 10 standard capture categories + 1 premium, each independently toggled. Nothing records without your opt-in
 - **Local-first** — SQLite database at `~/.methodproof/`, `chmod 600`. No network calls unless you choose
 - **Live streaming** — `methodproof start --live` streams events to the platform in real-time over WebSocket
 - **Integrity verification** — hash-chained events + Ed25519 attestation prove sessions haven't been tampered with
@@ -75,22 +78,27 @@ methodproof view      # explore your session in the browser
 On first `init`, you choose exactly which categories to capture:
 
 ```
-MethodProof Consent — choose what to capture
+MethodProof — Full Spectrum
 
 All data stays local in ~/.methodproof/. Nothing leaves your
-machine unless you explicitly run `methodproof push`.
+machine unless you explicitly run `mp push` or `mp publish`.
 
-  [x] 1. terminal_commands    Commands you run and their exit codes
-  [x] 2. command_output       First 500 chars of command output (secrets auto-filtered)
-  [x] 3. test_results         Pass/fail counts from pytest, jest, go test, cargo test
-  [x] 4. file_changes         File create, edit, and delete events with paths and sizes
-  [x] 5. git_diffs            Diff content of file changes (secrets auto-redacted)
-  [x] 6. git_commits          Commit hashes, messages, and changed file lists
-  [x] 7. ai_prompts           Text you send to AI tools
-  [x] 8. ai_responses         Text AI tools respond with
-  [x] 9. browser              Page visits, tab switches, searches, copy events (via extension)
+  [x]  1. terminal_commands    Commands you run and their exit codes
+  [x]  2. command_output       First 500 chars of command output (secrets auto filtered)
+  [x]  3. test_results         Pass/fail counts from pytest, jest, go test, cargo test
+  [x]  4. file_changes         File create, edit, and delete events with paths and line counts
+  [x]  5. git_commits          Commit hashes, messages, and changed file lists
+  [x]  6. ai_prompts           Your interactions with AI agents: prompts, slash commands,
+                                mode switches, and tool management. Captured as graph nodes
+  [x]  7. ai_responses         AI agent responses, tool calls, and results
+  [x]  8. browser              Page visits, tab switches, searches, copy events (via extension)
+  [x]  9. music                Now Playing track and artist (Spotify, Apple Music, etc.)
+  [x] 10. environment_analysis Structural profile of your AI dev environment: instruction file
+                                sizes, tool counts, config fingerprints (no file content stored)
 
-  Toggle: enter number | a = all on | n = all off | done = confirm
+  [ ]  0. code_capture         Full file diffs and git patches (Pro only, encrypted, private)
+
+  Toggle: enter number (0 for code capture) | a = all 10 on | n = all off | done = confirm
 ```
 
 Categories are enforced at three levels:
@@ -110,12 +118,32 @@ Change anytime with `methodproof consent`. Inspect data before pushing with `met
 | `terminal_commands` | `terminal_cmd` | Command text, exit code, duration. Sensitive commands auto-filtered |
 | `command_output` | field in `terminal_cmd` | First 500 chars of stdout. Redacted for sensitive patterns |
 | `test_results` | `test_run` | Framework name, pass/fail counts, duration |
-| `file_changes` | `file_create`, `file_edit`, `file_delete` | File paths, sizes, language, line counts |
-| `git_diffs` | field in `file_edit` | Diff content (max 2000 chars). Redacted for secret files |
+| `file_changes` | `file_create`, `file_edit`, `file_delete` | File paths, language, line counts |
 | `git_commits` | `git_commit` | Short hash, commit message, changed file list |
-| `ai_prompts` | `llm_prompt`, `agent_prompt` | Model name, prompt text, token count |
-| `ai_responses` | `llm_completion`, `agent_completion` | Response text, token count, latency, tool calls |
+| `ai_prompts` | `user_prompt`, `llm_prompt`, `agent_prompt` | Prompt metadata + 35 structural analysis fields (intent, cognitive level, specificity, etc.) |
+| `ai_responses` | `llm_completion`, `agent_completion`, tool events | Response metadata, tool calls, latency |
 | `browser` | browser events | Metadata only — no page content, no search text, no copied text |
+| `music` | `music_playing` | Track, artist, source, player |
+| `environment_analysis` | `environment_profile` | Instruction file sizes/sections/fingerprints, hook/plugin/MCP counts |
+| `code_capture` | field in `file_edit`, `git_commit` | Full diffs (Pro only, AES-256-GCM encrypted, private by default) |
+
+</details>
+
+<details>
+<summary>Prompt analysis — what gets extracted</summary>
+
+Every AI prompt is structurally analyzed at capture time. The full prompt text is read to extract metadata, then discarded — no content is stored. Fields include:
+
+| Dimension | Fields | Examples |
+|-----------|--------|---------|
+| **Intent** | `sa_intent` | `instruction`, `strategic_question`, `bug_report`, `correction`, `selection`, `verification` |
+| **Cognitive level** | `sa_cognitive_level` | `information`, `analysis`, `synthesis`, `evaluation`, `execution`, `decision` |
+| **Specificity** | `sa_specificity_score`, `sa_named_files`, `sa_named_functions`, `sa_named_technologies` | 0.0 (vague) to 1.0 (precise) |
+| **Context dependency** | `sa_context_dependency`, `sa_pronoun_count`, `sa_is_follow_up` | `total` (e.g. "Option B"), `low` (self-contained) |
+| **Collaboration mode** | `sa_collaboration_mode` | `delegating`, `thinking_together`, `reviewing`, `selecting`, `correcting` |
+| **Structure** | `sa_has_code_blocks`, `sa_has_error_trace`, `sa_has_constraints`, `sa_is_compound` | Booleans and counts |
+
+At session end, outcome metrics are computed: first-shot apply rate, follow-up sequences, phase transitions, and correction counts.
 
 </details>
 
@@ -158,7 +186,7 @@ All sensitive metadata (prompts, completions, commands, output, diffs) is encryp
 `methodproof init` auto-detects and installs hooks for:
 
 - **Shell** — bash/zsh preexec/precmd hooks
-- **Claude Code** — prompt, tool, and session event hooks
+- **Claude Code** — prompt, tool, agent, and session event hooks (structural analysis on prompts)
 - **OpenClaw** — hook + skill for agent telemetry
 - **AI CLIs** — codex, gemini, aider command wrappers
 - **MCP server** — registered with Claude Code for session/graph queries
@@ -169,7 +197,7 @@ All sensitive metadata (prompts, completions, commands, output, diffs) is encryp
 
 | File | Purpose |
 |------|---------|
-| `config.json` | API URL, auth token, E2E key (chmod 600) |
+| `config.json` | API URL, auth token, consent settings, E2E key (chmod 600) |
 | `methodproof.db` | Sessions, events, graph (chmod 600) |
 | `commands.jsonl` | Shell command log |
 
