@@ -10,6 +10,11 @@ import sys
 import time
 import urllib.request
 
+try:
+    from methodproof.analysis import analyze_prompt
+except ImportError:
+    analyze_prompt = lambda _: {}
+
 _TYPE_MAP = {
     "UserPromptSubmit": "user_prompt",
     "PreToolUse": "tool_call",
@@ -25,6 +30,7 @@ _META_EXTRACTORS = {
     "UserPromptSubmit": lambda d: {
         "prompt_preview": (d.get("prompt") or "")[:200],
         "prompt_length": len(d.get("prompt") or ""),
+        **analyze_prompt(d.get("prompt") or ""),
     },
     "PreToolUse": lambda d: {"tool": d.get("tool_name", "unknown"), "tool_use_id": d.get("tool_use_id", "")},
     "PostToolUse": lambda d: {"tool": d.get("tool_name", "unknown"), "tool_use_id": d.get("tool_use_id", "")},

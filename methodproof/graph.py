@@ -1,6 +1,7 @@
 """Graph builder — NEXT chain + causal links from SQLite events."""
 
 import json
+import time
 import uuid
 from typing import Any
 
@@ -72,6 +73,22 @@ def build(session_id: str) -> dict[str, int]:
 
     # Action → Artifact links (PRODUCED, MODIFIED)
     _link_action_artifacts(db, session_id)
+
+    # Prompt outcome metrics
+    try:
+        from methodproof.analysis import compute_outcomes
+        outcomes = compute_outcomes(session_id)
+        if outcomes and outcomes.get("total_prompts", 0) > 0:
+            db.execute(
+                "INSERT OR IGNORE INTO events "
+                "(id, session_id, type, timestamp, duration_ms, metadata) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (uuid.uuid4().hex, session_id, "prompt_outcomes",
+                 time.time(), 0, json.dumps(outcomes)),
+            )
+            stats["outcomes"] = 1
+    except Exception:
+        pass
 
     db.commit()
     return stats

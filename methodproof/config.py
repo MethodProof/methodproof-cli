@@ -55,7 +55,7 @@ CAPTURE_DESCRIPTIONS: dict[str, str] = {
     "test_results": "Pass/fail counts from pytest, jest, go test, cargo test",
     "file_changes": "File create, edit, and delete events with paths and line counts",
     "git_commits": "Commit hashes, messages, and changed file lists",
-    "ai_prompts": "Text you send to AI agents (Claude Code, codex, aider, etc.). Captured as AI Agent Graph nodes",
+    "ai_prompts": "Your interactions with AI agents: prompts, slash commands, mode switches, and tool management. Captured as graph nodes (Claude Code, codex, aider, etc.)",
     "ai_responses": "AI agent responses, tool calls, and results. Captured as AI Agent Graph edges",
     "browser": "Page visits, tab switches, searches, copy events (via extension)",
     "music": "Now Playing track and artist (Spotify, Apple Music, etc.)",

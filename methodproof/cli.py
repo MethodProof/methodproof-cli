@@ -483,6 +483,15 @@ def cmd_start(args: argparse.Namespace) -> None:
             sys.exit(1)
 
     base.init(sid, live=live_ok)
+
+    if capture.get("environment_analysis", True):
+        from methodproof.analysis import scan_environment
+        try:
+            env_profile = scan_environment(watch_dir)
+            base.emit("environment_profile", env_profile)
+        except Exception:
+            base.log("warning", "environment_scan.failed")
+
     stop_event = threading.Event()
 
     threads: list[threading.Thread] = []

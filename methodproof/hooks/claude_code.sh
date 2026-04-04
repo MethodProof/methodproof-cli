@@ -25,6 +25,11 @@ fi
 if command -v jq >/dev/null 2>&1; then
   case "$EVENT" in
     UserPromptSubmit)
+      # Delegate to Python for structural analysis (shell can't do regex classification)
+      if echo "$INPUT" | python3 -m methodproof.hooks.claude_code 2>/dev/null; then
+        exit 0
+      fi
+      # Fallback: basic metadata only (no structural analysis)
       TYPE="user_prompt"
       META=$(echo "$INPUT" | jq -c '{prompt_preview: (.prompt // "" | .[0:200]), prompt_length: (.prompt // "" | length)}' 2>/dev/null || echo '{}')
       ;;
