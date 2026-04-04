@@ -452,6 +452,16 @@ def cmd_start(args: argparse.Namespace) -> None:
         print("Run `methodproof init` first.")
         sys.exit(1)
 
+    # Check for new consent categories before recording
+    capture = cfg.get("capture", {})
+    new_cats = (set(config.STANDARD_CATEGORIES) | {"code_capture"}) - set(capture.keys())
+    if new_cats:
+        print(f"\n  New capture categories available: {', '.join(sorted(new_cats))}")
+        print("  Please review your consent settings before recording.\n")
+        cfg = _run_consent(cfg)
+        config.save(cfg)
+        print()
+
     sid = uuid.uuid4().hex
     watch_dir = os.path.abspath(args.dir or ".")
     repo_url = args.repo or repos.detect_repo(watch_dir)
@@ -793,6 +803,7 @@ def cmd_update(args: argparse.Namespace) -> None:
         return
     if latest == current:
         print(f"Already up to date (v{current}).")
+        _check_consent_drift()
         return
     print(f"Updating v{current} -> v{latest}...")
     import subprocess as sp
@@ -802,8 +813,27 @@ def cmd_update(args: argparse.Namespace) -> None:
     )
     if result.returncode == 0:
         print(f"Updated to v{latest}.")
+        _check_consent_drift()
     else:
         print(f"Update failed. Try manually: pip install --upgrade methodproof")
+
+
+def _check_consent_drift() -> None:
+    """If new capture categories exist since last consent, re-run the consent flow."""
+    cfg = config.load()
+    capture = cfg.get("capture", {})
+    known = set(capture.keys())
+    current = set(config.STANDARD_CATEGORIES) | {"code_capture"}
+    new_categories = current - known
+
+    if not new_categories:
+        return
+
+    print(f"\n  New capture categories available: {', '.join(sorted(new_categories))}")
+    print("  Your consent preferences need updating.\n")
+    cfg = _run_consent(cfg)
+    config.save(cfg)
+    print(f"\n{_banner()} settings saved.\n")
 
 
 def _get_current_version() -> str:
