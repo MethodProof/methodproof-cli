@@ -1,38 +1,78 @@
+<p align="center">
+  <img src="https://cdn.methodproof.com/og/og-primary-dark.png" alt="MethodProof — Engineering Process Intelligence" width="720" />
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/methodproof/"><img src="https://img.shields.io/pypi/v/methodproof?color=%23c9a84c&style=flat-square" alt="PyPI"></a>
+  <a href="https://pypi.org/project/methodproof/"><img src="https://img.shields.io/pypi/pyversions/methodproof?color=%23803794&style=flat-square" alt="Python"></a>
+  <a href="https://github.com/MethodProof/methodproof-cli/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-%232d7a42?style=flat-square" alt="License"></a>
+</p>
+
 # MethodProof
 
-See how you code — capture and visualize your engineering process.
+**Your engineering process, visualized as a knowledge graph.**
+
+MethodProof captures how you work — terminal commands, file edits, git commits, AI interactions — and renders it as an interactive process graph you can explore, share, and prove.
+
+No account required. Fully offline. Your data stays on your machine unless you explicitly push it.
+
+<p align="center">
+  <img src="https://cdn.methodproof.com/illustrations/hero-light.png" alt="Process graph — every action connected as a timeline" width="720" />
+</p>
+
+## Install
 
 ```bash
 pip install methodproof
-methodproof init     # install hooks, acknowledge data capture
-methodproof start    # begin recording
-# ... code ...
-methodproof stop     # stop recording, build process graph
-methodproof view     # explore session graph in browser
 ```
 
-No account required. Fully offline. Your data stays on your machine unless you explicitly `push`.
+## Quick Start
+
+```bash
+methodproof init      # choose what to capture, install hooks
+methodproof start     # begin recording
+# ... code normally ...
+methodproof stop      # stop recording, build process graph
+methodproof view      # explore your session in the browser
+```
+
+`methodproof view` opens a D3-powered interactive graph: every action is a node, every relationship is an edge. You see exactly how your session unfolded — which commands led to which edits, when you consulted AI, where you hit dead ends and recovered.
+
+## Features
+
+- **Process graph** — D3 interactive visualization of your entire session as a knowledge graph
+- **Granular consent** — 9 capture categories, each independently toggled. Nothing records without your opt-in
+- **Local-first** — SQLite database at `~/.methodproof/`, `chmod 600`. No network calls unless you choose
+- **Live streaming** — `methodproof start --live` streams events to the platform in real-time over WebSocket
+- **Integrity verification** — hash-chained events + Ed25519 attestation prove sessions haven't been tampered with
+- **E2E encryption** — optional company-held AES-256-GCM encryption the platform cannot decrypt
+- **Auto-detection** — hooks for shell, Claude Code, OpenClaw, codex, gemini, aider installed automatically
+- **Platform sync** — `methodproof push` uploads sessions. `methodproof publish` makes them public and shareable
 
 ## Commands
 
-| Command | Description |
+| Command | What it does |
 |---------|-------------|
-| `init` | Install hooks, create data directory. Interactive consent selector on first run |
-| `start [--dir .] [--repo URL] [--tags t1,t2] [--public]` | Start recording a session |
+| `init` | Interactive consent selector, install hooks, create data directory |
+| `start [--dir .] [--tags t1,t2] [--public] [--live]` | Start recording |
 | `stop` | Stop recording, build process graph |
-| `view [session_id] [--port 9876]` | View session graph in browser (D3 visualization) |
-| `log` | List local sessions with sync status, visibility, tags |
-| `login [--api-url URL]` | Connect to MethodProof platform (email + password) |
-| `push [session_id]` | Upload session to platform |
-| `tag <session_id> <tags>` | Add comma-separated tags to a session |
-| `publish [session_id]` | Set visibility to public and push |
-| `delete <session_id> [-f]` | Delete a session and all its data (with confirmation) |
-| `consent` | Review or change capture categories at any time |
-| `mcp-serve` | Run MCP server (used by Claude Code integration) |
+| `view [session_id]` | Open session graph in browser |
+| `log` | List sessions with sync status, visibility, tags |
+| `login` | Authenticate with the platform |
+| `push [session_id]` | Upload session |
+| `publish [session_id]` | Set public + push |
+| `tag <session_id> <tags>` | Add tags |
+| `delete <session_id> [-f]` | Delete session and all its data |
+| `consent` | Change capture categories |
+| `review` | Inspect session data before pushing |
+| `update` | Check for and install CLI updates |
 
-## Consent & Capture Categories
+## Privacy & Consent
 
-On first `init`, MethodProof shows an interactive consent selector. You choose exactly which categories of data to capture — nothing is recorded without your explicit opt-in.
+<details>
+<summary>How consent works</summary>
+
+On first `init`, you choose exactly which categories to capture:
 
 ```
 MethodProof Consent — choose what to capture
@@ -46,47 +86,56 @@ machine unless you explicitly run `methodproof push`.
   [x] 4. file_changes         File create, edit, and delete events with paths and sizes
   [x] 5. git_diffs            Diff content of file changes (secrets auto-redacted)
   [x] 6. git_commits          Commit hashes, messages, and changed file lists
-  [x] 7. ai_prompts           Text you send to AI tools (Claude Code, OpenClaw, codex, etc.)
-  [x] 8. ai_responses         Text AI tools respond with, including tool calls
+  [x] 7. ai_prompts           Text you send to AI tools
+  [x] 8. ai_responses         Text AI tools respond with
   [x] 9. browser              Page visits, tab switches, searches, copy events (via extension)
 
   Toggle: enter number | a = all on | n = all off | done = confirm
 ```
 
-Categories are enforced at every level:
-- **Agent level** — disabled agents don't start (no CPU/memory overhead)
-- **Event level** — events from disabled categories are silently dropped
-- **Field level** — `command_output` and `git_diffs` strip specific fields from events that are otherwise captured
+Categories are enforced at three levels:
+- **Agent level** — disabled agents don't start
+- **Event level** — events from disabled categories are dropped
+- **Field level** — specific fields stripped from events that are otherwise captured
 
-Change your choices anytime with `methodproof consent`.
+Change anytime with `methodproof consent`. Inspect data before pushing with `methodproof review`.
 
-### What Each Category Captures
+</details>
+
+<details>
+<summary>Capture categories reference</summary>
 
 | Category | Events | Details |
 |----------|--------|---------|
-| `terminal_commands` | `terminal_cmd` | Command text, exit code, duration. Sensitive commands (passwords, tokens, API keys) are auto-filtered |
-| `command_output` | (field in `terminal_cmd`) | First 500 chars of stdout. Redacted if it contains sensitive patterns |
+| `terminal_commands` | `terminal_cmd` | Command text, exit code, duration. Sensitive commands auto-filtered |
+| `command_output` | field in `terminal_cmd` | First 500 chars of stdout. Redacted for sensitive patterns |
 | `test_results` | `test_run` | Framework name, pass/fail counts, duration |
 | `file_changes` | `file_create`, `file_edit`, `file_delete` | File paths, sizes, language, line counts |
-| `git_diffs` | (field in `file_edit`) | Diff content (max 2000 chars). Redacted for secret files (`.env`, `.pem`, credentials) |
+| `git_diffs` | field in `file_edit` | Diff content (max 2000 chars). Redacted for secret files |
 | `git_commits` | `git_commit` | Short hash, commit message, changed file list |
-| `ai_prompts` | `llm_prompt`, `agent_prompt` | Model name, prompt text, token count, temperature |
-| `ai_responses` | `llm_completion`, `agent_completion`, tool events | Response text, token count, latency, tool calls |
-| `browser` | `browser_visit`, `browser_search`, `browser_tab_switch`, `browser_copy`, `browser_ai_chat` | Metadata only — no page content, no search query text, no copied text |
+| `ai_prompts` | `llm_prompt`, `agent_prompt` | Model name, prompt text, token count |
+| `ai_responses` | `llm_completion`, `agent_completion` | Response text, token count, latency, tool calls |
+| `browser` | browser events | Metadata only — no page content, no search text, no copied text |
 
-All data is stored locally in `~/.methodproof/methodproof.db` (SQLite, `chmod 600`).
+</details>
 
-## Deleting Data
+## Integrity & Encryption
 
-```bash
-# Delete a session and all related data
-methodproof delete <session_id>
+<details>
+<summary>Integrity verification</summary>
 
-# Skip confirmation prompt
-methodproof delete <session_id> --force
-```
+Three layers ensure session data hasn't been tampered with:
 
-## E2E Encryption
+**Hash-chained events** — every event includes a SHA-256 hash linking to the previous event. Any modification breaks the chain, detectable via `GET /sessions/{id}/chain/verify`.
+
+**Ed25519 attestation** — on `methodproof push`, the CLI signs a session summary with your private key. Install with `pip install methodproof[signing]`. Key generated during `methodproof init`, stored in `~/.methodproof/config.json`.
+
+**Binary hash self-reporting** — the CLI reports its own binary hash on push. The platform compares against known release hashes to detect modified builds.
+
+</details>
+
+<details>
+<summary>E2E encryption</summary>
 
 For company-managed encryption where the platform cannot read your data:
 
@@ -94,68 +143,36 @@ For company-managed encryption where the platform cannot read your data:
 pip install methodproof[e2e]
 ```
 
-Set your company's encryption key in `~/.methodproof/config.json`:
+Set your company's key in `~/.methodproof/config.json`:
 
 ```json
-{
-  "e2e_key": "<64-char-hex-key>"
-}
+{ "e2e_key": "<64-char-hex-key>" }
 ```
 
-When set, all sensitive metadata (prompts, completions, commands, output, diffs) is encrypted with AES-256-GCM before storage and before any platform sync. The platform stores ciphertext it cannot decrypt.
+All sensitive metadata (prompts, completions, commands, output, diffs) is encrypted with AES-256-GCM before storage and before any platform sync.
 
-## Connecting to Platform
-
-```bash
-methodproof login                    # authenticate
-methodproof push                     # upload latest session
-methodproof push abc123              # upload specific session
-methodproof publish                  # set public + push
-methodproof tag abc123 python,react  # add tags
-```
-
-For self-hosted instances:
-
-```bash
-methodproof login --api-url https://mp.company.com/api
-```
-
-## Integrity Verification
-
-MethodProof uses a multi-layer integrity system to ensure session data has not been tampered with.
-
-**Hash-chained events:** Every event emitted during a session includes a SHA-256 hash linking it to the previous event, forming a verifiable chain. Hashes are computed at emit time and stored in `event_hashes` in the local database. Any gap or modification breaks the chain and is detectable on the platform via `GET /sessions/{id}/chain/verify`.
-
-**Ed25519 attestation on push:** When you run `methodproof push`, the CLI signs a summary of the session (event count, first/last hash, duration) with your Ed25519 private key. The platform stores the signed attestation and exposes it via `GET /sessions/{id}/integrity`. Reviewers can verify the session was pushed by the key holder without modification.
-
-**Binary hash self-reporting:** On each push, the CLI reports its own binary hash to the platform. The platform compares this against known release hashes published via `GET /cli/releases` to detect modified or unofficial builds.
-
-### Signing Key
-
-A signing key is generated automatically during `methodproof init`. To enable Ed25519 signing, install the signing extra:
-
-```bash
-pip install methodproof[signing]
-```
-
-The private key is stored in `~/.methodproof/config.json` (`chmod 600`). The corresponding public key is registered with the platform on first push via `POST /personal/signing-keys`.
+</details>
 
 ## Integrations
 
-`methodproof init` automatically installs hooks for detected tools:
+`methodproof init` auto-detects and installs hooks for:
 
-- **Shell** — bash/zsh preexec/precmd hooks for command capture
-- **Claude Code** — hooks for prompt/tool/session events
-- **OpenClaw** — hook + skill for agent-level telemetry
-- **AI CLI wrappers** — codex, gemini, aider command wrappers
+- **Shell** — bash/zsh preexec/precmd hooks
+- **Claude Code** — prompt, tool, and session event hooks
+- **OpenClaw** — hook + skill for agent telemetry
+- **AI CLIs** — codex, gemini, aider command wrappers
 - **MCP server** — registered with Claude Code for session/graph queries
 
-## Configuration
+## Data Directory
 
-Data directory: `~/.methodproof/`
+`~/.methodproof/`
 
 | File | Purpose |
 |------|---------|
-| `config.json` | API URL, auth token, email, E2E key (`chmod 600`) |
-| `methodproof.db` | SQLite database with sessions, events, graph (`chmod 600`) |
-| `commands.jsonl` | Shell command log (consumed by terminal monitor) |
+| `config.json` | API URL, auth token, E2E key (chmod 600) |
+| `methodproof.db` | Sessions, events, graph (chmod 600) |
+| `commands.jsonl` | Shell command log |
+
+## License
+
+[Apache 2.0](LICENSE)
