@@ -26,18 +26,45 @@ def sync_metadata(session: dict[str, Any], token: str, api_url: str) -> None:
                  {"visibility": "public"})
 
 
+def _raw_request(
+    method: str, url: str, token: str,
+    body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    data = json.dumps(body).encode() if body else None
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read())
+
+
+def _refresh_token(api_url: str, refresh: str) -> tuple[str, str] | None:
+    """Exchange refresh token for new access + refresh tokens. Returns None on failure."""
+    try:
+        result = _raw_request("POST", f"{api_url}/auth/refresh", "", {"refresh_token": refresh})
+        return result["access_token"], result["refresh_token"]
+    except Exception:
+        return None
+
+
 def _request(
     method: str, path: str, api_url: str, token: str,
     body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     url = f"{api_url}{path}"
-    data = json.dumps(body).encode() if body else None
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read())
+        return _raw_request(method, url, token, body)
     except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            from methodproof import config
+            cfg = config.load()
+            refresh = cfg.get("refresh_token", "")
+            if refresh:
+                pair = _refresh_token(api_url, refresh)
+                if pair:
+                    cfg["token"], cfg["refresh_token"] = pair
+                    config.save(cfg)
+                    return _raw_request(method, url, cfg["token"], body)
+            raise SystemExit("Session expired. Run `methodproof login` to re-authenticate.") from None
         detail = ""
         if exc.fp:
             try:

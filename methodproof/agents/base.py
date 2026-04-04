@@ -45,6 +45,7 @@ _EVENT_GATES: dict[str, str] = {
     "browser_copy": "browser",
     "browser_ai_chat": "browser",
     "music_playing": "music",
+    "environment_profile": "environment_analysis",
 }
 
 # Maps capture categories to (event_type, field) pairs for field-level gating.

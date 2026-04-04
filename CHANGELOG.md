@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-04-04
+
+### Changed
+- **README rebrand** — OG dark banner, hero process graph illustration, brand-colored badges (gold/purple/green). Value prop and features up front. Consent, integrity, and encryption details in collapsible `<details>` blocks. Added `review` and `update` to command reference.
+
 ## 2026-04-02
 
 ### Added

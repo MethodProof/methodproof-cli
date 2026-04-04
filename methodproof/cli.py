@@ -88,8 +88,8 @@ def _run_consent(cfg: dict) -> dict:
     print("  SECTION 1: What gets recorded locally")
     print("=" * 60)
     print()
-    print("  These 9 categories are structural metadata only.")
-    print("  Enable all 9 to unlock free live streaming.\n")
+    print("  These 10 categories are structural metadata only.")
+    print("  Enable all 10 to unlock free live streaming.\n")
 
     while True:
         for i, key in enumerate(std, 1):
@@ -104,13 +104,13 @@ def _run_consent(cfg: dict) -> dict:
         if is_full:
             print("  |  Free live streaming unlocked")
         else:
-            print(f"  |  Enable all 9 for free live streaming")
+            print(f"  |  Enable all 10 for free live streaming")
 
         # Code capture (separate, premium)
         cc_mark = "x" if capture.get("code_capture", False) else " "
         print(f"\n  [{cc_mark}] 0. {'code_capture':<20s} {config.CAPTURE_DESCRIPTIONS['code_capture']}")
 
-        print("\n  Toggle: enter number (0 for code capture) | a = all 9 on | n = all off | done = confirm\n")
+        print("\n  Toggle: enter number (0 for code capture) | a = all 10 on | n = all off | done = confirm\n")
 
         choice = input("  > ").strip().lower()
         if choice in ("done", "d", ""):
@@ -145,7 +145,7 @@ def _run_consent(cfg: dict) -> dict:
     print()
 
     if not is_full:
-        print("  Research contribution requires all 9 standard categories enabled.")
+        print("  Research contribution requires all 10 standard categories enabled.")
         print("  You can enable this later via `methodproof consent`.\n")
         cfg["research_consent"] = False
     else:
@@ -651,6 +651,7 @@ def cmd_login(args: argparse.Namespace) -> None:
             poll = _request("GET", f"/auth/cli/poll?code={code}", api, "")
             if poll.get("status") == "complete":
                 cfg["token"] = poll["token"]
+                cfg["refresh_token"] = poll.get("refresh_token", "")
                 cfg["api_url"] = api
                 config.save(cfg)
                 print(" done.\n")

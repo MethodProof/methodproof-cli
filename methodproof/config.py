@@ -15,6 +15,7 @@ CMD_LOG = DIR / "commands.jsonl"
 _DEFAULTS: dict[str, Any] = {
     "api_url": "https://api.methodproof.com",
     "token": "",
+    "refresh_token": "",
     "email": "",
     "active_session": None,
     "e2e_key": "",
@@ -28,6 +29,7 @@ _DEFAULTS: dict[str, Any] = {
         "ai_responses": True,
         "browser": True,
         "music": True,
+        "environment_analysis": True,
         "code_capture": False,
     },
     "research_consent": False,
@@ -39,10 +41,11 @@ _DEFAULTS: dict[str, Any] = {
     },
 }
 
-# The 9 standard categories (excludes code_capture)
+# The 10 standard categories (excludes code_capture)
 STANDARD_CATEGORIES = [
     "terminal_commands", "command_output", "test_results", "file_changes",
     "git_commits", "ai_prompts", "ai_responses", "browser", "music",
+    "environment_analysis",
 ]
 
 # Descriptions shown during interactive consent
@@ -56,6 +59,7 @@ CAPTURE_DESCRIPTIONS: dict[str, str] = {
     "ai_responses": "AI agent responses, tool calls, and results. Captured as AI Agent Graph edges",
     "browser": "Page visits, tab switches, searches, copy events (via extension)",
     "music": "Now Playing track and artist (Spotify, Apple Music, etc.)",
+    "environment_analysis": "Structural profile of your AI dev environment: instruction file sizes, tool counts, config fingerprints (no file content stored)",
     "code_capture": "Full file diffs and git patches (Pro only, encrypted, private by default)",
 }
 
