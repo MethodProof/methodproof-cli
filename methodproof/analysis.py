@@ -3,9 +3,17 @@
 import hashlib
 import json
 import re
-import time
+import sys
 from pathlib import Path
 from typing import Any
+
+_TOKEN_PER_WORD = 1.3
+_BUG_REPORT_WORD_LIMIT = 200
+
+
+def _warn(event: str, **kw: object) -> None:
+    """Minimal warning to stderr — analysis.py is stdlib-only, no StructuredLogger."""
+    sys.stderr.write(json.dumps({"level": "warning", "event": event, **kw}, default=str) + "\n")
 
 # ---------------------------------------------------------------------------
 # Intent classification (first-match cascade, ordered by specificity)
@@ -300,7 +308,7 @@ def analyze_prompt(text: str) -> dict[str, Any]:
     line_count = text.count("\n") + 1
     char_count = len(text)
     sentence_count = max(1, len(_RE_SENTENCE_SPLIT.split(stripped)))
-    token_estimate = int(word_count * 1.3)
+    token_estimate = int(word_count * _TOKEN_PER_WORD)
 
     # --- Structural features ---
     code_blocks = _RE_CODE_BLOCK.findall(text)
@@ -385,7 +393,7 @@ def analyze_prompt(text: str) -> dict[str, Any]:
         1 for line in text.splitlines()
         if _RE_IMPERATIVE.match(line.strip())
     )
-    is_compound = imperative_lines >= 2 or ";" in text and _RE_IMPERATIVE.search(text)
+    is_compound = imperative_lines >= 2 or (";" in text and _RE_IMPERATIVE.search(text))
 
     return {
         "sa_intent": intent,
@@ -452,7 +460,8 @@ def scan_environment(watch_dir: str) -> dict[str, Any]:
             continue
         try:
             content = path.read_text(errors="replace")
-        except OSError:
+        except OSError as exc:
+            _warn("analysis.instruction_file.read_failed", path_pattern=pattern, error=str(exc))
             continue
         instruction_files.append(_analyze_instruction_file(pattern, content))
 
@@ -533,7 +542,8 @@ def compute_outcomes(session_id: str) -> dict[str, Any]:
             continue
         try:
             meta = json.loads(e["metadata"])
-        except (json.JSONDecodeError, TypeError):
+        except (json.JSONDecodeError, TypeError) as exc:
+            _warn("analysis.metadata_parse_failed", event_id=e["id"] if hasattr(e, "__getitem__") else "?", error=str(exc))
             continue
         intent = meta.get("sa_intent")
         if intent == "correction":
@@ -586,7 +596,7 @@ def _classify_intent(text: str, word_count: int, has_error: bool) -> str:
         return "selection"
     if _RE_CORRECTION.search(text):
         return "correction"
-    if has_error and word_count < 200:
+    if has_error and word_count < _BUG_REPORT_WORD_LIMIT:
         return "bug_report"
     is_question = "?" in text
     if is_question:
@@ -635,7 +645,7 @@ def _analyze_instruction_file(pattern: str, content: str) -> dict[str, Any]:
     lines = content.splitlines()
     line_count = len(lines)
     word_count = len(content.split())
-    token_estimate = int(word_count * 1.3)
+    token_estimate = int(word_count * _TOKEN_PER_WORD)
 
     headings = _RE_MD_HEADING.findall(content)
     section_count = len(headings)
@@ -703,7 +713,8 @@ def _analyze_tool_ecosystem(claude_dir: Path) -> dict[str, Any]:
     if settings_path.exists():
         try:
             settings = json.loads(settings_path.read_text())
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as exc:
+            _warn("analysis.settings_parse_failed", path="settings.json", error=str(exc))
             settings = {}
 
         hooks = settings.get("hooks", {})
@@ -722,7 +733,8 @@ def _analyze_tool_ecosystem(claude_dir: Path) -> dict[str, Any]:
     if local_path.exists():
         try:
             local = json.loads(local_path.read_text())
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as exc:
+            _warn("analysis.settings_parse_failed", path="settings.local.json", error=str(exc))
             local = {}
 
         mcp = local.get("mcpServers", {})
