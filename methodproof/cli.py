@@ -708,13 +708,17 @@ def cmd_log(args: argparse.Namespace) -> None:
     if not sessions:
         print("No sessions yet.")
         return
+    unsynced = [s for s in sessions if not s["synced"] and s.get("completed_at") and s["total_events"] > 0]
+    if unsynced:
+        print(f"  [{len(unsynced)} session{'s' if len(unsynced) != 1 else ''} behind sync] — run `mp push` to upload\n")
     for s in sessions:
         sync_tag = "synced" if s["synced"] else "local"
+        status = _session_status(s)
         dt = datetime.fromtimestamp(s["created_at"], tz=UTC).strftime("%Y-%m-%d %H:%M")
         dur = _duration(s)
         vis = s.get("visibility", "private")
         tags = json.loads(s.get("tags") or "[]")
-        suffix = f"  [{sync_tag}]"
+        suffix = f"  [{sync_tag}]  {status}"
         if vis != "private":
             suffix += f"  {vis}"
         if tags:
@@ -974,6 +978,19 @@ def cmd_mcp_serve(args: argparse.Namespace) -> None:
 def _latest() -> str | None:
     sessions = store.list_sessions()
     return sessions[0]["id"] if sessions else None
+
+
+def _session_status(s: dict) -> str:
+    active = config.load().get("active_session")
+    if s["id"] == active:
+        return "recording"
+    if not s.get("completed_at"):
+        return "abandoned"
+    if s["total_events"] == 0:
+        return "empty"
+    if s["synced"]:
+        return "pushed"
+    return "stopped"
 
 
 def _duration(s: dict) -> str:
