@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.4] — 2026-04-05
+
+### Added
+- `mp log` shows session status: recording, stopped, pushed, empty, abandoned
+- `mp log` prints sync reminder when unsynced sessions exist
+
 ## [0.3.3] — 2026-04-05
 
 ### Fixed
