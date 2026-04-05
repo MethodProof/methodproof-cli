@@ -113,12 +113,12 @@ def emit(event_type: str, metadata: dict[str, Any]) -> None:
 
     # Journal mode gate — strip content fields when journal is OFF (default).
     # Structural equivalents (prompt_length, etc.) are always kept.
+    # Journal ON = complete explicit record. Journal OFF = structural only.
     if not _journal_mode:
         from methodproof.config import JOURNAL_CONTENT_FIELDS
-        for _category, pairs in JOURNAL_CONTENT_FIELDS.items():
-            for etype, field in pairs:
-                if event_type == etype and field in metadata:
-                    metadata.pop(field, None)
+        for etype, field in JOURNAL_CONTENT_FIELDS:
+            if event_type == etype and field in metadata:
+                metadata.pop(field, None)
 
     entry = {
         "id": uuid.uuid4().hex,

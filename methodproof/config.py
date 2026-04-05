@@ -65,28 +65,42 @@ CAPTURE_DESCRIPTIONS: dict[str, str] = {
 }
 
 # Content fields that Journal Mode unlocks. When journal_mode is OFF (default),
-# these fields are stripped to structural equivalents (e.g., prompt_text → prompt_length only).
-# When journal_mode is ON (Pro+), full content is persisted and encrypted.
-JOURNAL_CONTENT_FIELDS: dict[str, list[tuple[str, str]]] = {
-    "ai_prompts": [
-        ("llm_prompt", "prompt_text"),
-        ("agent_prompt", "prompt_preview"),
-        ("user_prompt", "prompt_preview"),
-    ],
-    "ai_responses": [
-        ("llm_completion", "response_text"),
-        ("agent_completion", "response_preview"),
-        ("agent_tool_dispatch", "tool_input_preview"),
-        ("agent_tool_result", "result_preview"),
-    ],
-    "command_output": [
-        ("terminal_cmd", "output_snippet"),
-    ],
-    "code_capture": [
-        ("file_edit", "diff"),
-        ("git_commit", "diff"),
-    ],
-}
+# these fields are stripped — only structural equivalents remain (lengths, counts, types).
+# When journal_mode is ON (Pro+), EVERYTHING is persisted and encrypted.
+# Journal = the complete, explicit record of the session.
+JOURNAL_CONTENT_FIELDS: list[tuple[str, str]] = [
+    # AI prompts — full prompt text
+    ("llm_prompt", "prompt_text"),
+    ("agent_prompt", "prompt_preview"),
+    ("user_prompt", "prompt_preview"),
+    # AI responses — full completion text
+    ("llm_completion", "response_text"),
+    ("agent_completion", "response_preview"),
+    ("agent_tool_dispatch", "tool_input_preview"),
+    ("agent_tool_result", "result_preview"),
+    ("agent_skill_invoke", "skill_input_preview"),
+    # Terminal — full command output
+    ("terminal_cmd", "output_snippet"),
+    ("terminal_cmd", "command"),
+    # Code — full diffs and commit messages
+    ("file_edit", "diff"),
+    ("git_commit", "diff"),
+    ("git_commit", "message"),
+    # Web — full search queries, URLs, page titles
+    ("web_search", "query"),
+    ("web_search", "clicked_results"),
+    ("web_visit", "url"),
+    ("web_visit", "title"),
+    # Browser — full search queries, URLs, copy content, AI chat input
+    ("browser_search", "query"),
+    ("browser_visit", "url"),
+    ("browser_visit", "title"),
+    ("browser_copy", "text_snippet"),
+    ("browser_ai_chat", "detected_input"),
+    ("browser_ai_chat", "url"),
+    # Inline completions — provider detail
+    ("inline_completion_accepted", "text_length"),
+]
 
 
 def ensure_dirs() -> None:
