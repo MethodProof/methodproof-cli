@@ -55,7 +55,7 @@ def _detect_layers() -> dict[str, bool]:
     return layers
 
 
-def start(api_url: str, token: str, session_id: str, consent: dict[str, bool]) -> str | None:
+def start(api_url: str, token: str, session_id: str, consent: dict[str, bool], live_visibility: str = "private") -> str | None:
     """Connect to platform WebSocket, perform handshake. Returns live URL or None."""
     import websocket  # websocket-client
 
@@ -65,9 +65,14 @@ def start(api_url: str, token: str, session_id: str, consent: dict[str, bool]) -
     global _ws
     _ws = websocket.create_connection(url, timeout=10)
 
-    # Handshake — send consent + installed capture layers
+    # Handshake — send consent, capture layers, and live visibility
     layers = _detect_layers()
-    _ws.send(json.dumps({"type": "handshake", "consent": consent, "layers": layers}))
+    _ws.send(json.dumps({
+        "type": "handshake",
+        "consent": consent,
+        "layers": layers,
+        "live_visibility": live_visibility,
+    }))
     reply = json.loads(_ws.recv())
 
     if reply.get("type") != "ready":

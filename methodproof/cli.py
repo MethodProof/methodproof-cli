@@ -310,7 +310,8 @@ def _print_commands() -> None:
     print(f"  {_W}RECORD{R}")
     print(f"    {_G}mp start{R}              Start recording a session")
     print(f"    {_G}mp stop{R}               Stop recording, build process graph")
-    print(f"    {_G}mp start --live{R}        Stream your graph in real time")
+    print(f"    {_G}mp start --live{R}        Stream your graph privately (only you can view)")
+    print(f"    {_G}mp start --live-public{R} Stream your graph publicly (shareable link)")
     print()
     print(f"  {_W}REVIEW{R}")
     print(f"    {_C}mp view{R}  {_D}[id]{R}          View session graph in browser")
@@ -511,7 +512,9 @@ def cmd_start(args: argparse.Namespace) -> None:
     capture = cfg.get("capture", {})
 
     live_url = ""
-    if args.live:
+    want_live = args.live or getattr(args, "live_public", False)
+    live_visibility = "public" if getattr(args, "live_public", False) else "private"
+    if want_live:
         if not cfg.get("token"):
             print("Live mode requires login. Run `methodproof login` first.")
             sys.exit(1)
@@ -522,10 +525,16 @@ def cmd_start(args: argparse.Namespace) -> None:
         store.mark_synced(sid, remote_id)
         # Connect live WebSocket
         from methodproof import live as live_mod
-        live_url = live_mod.start(cfg["api_url"], cfg["token"], remote_id, capture) or ""
+        live_url = live_mod.start(cfg["api_url"], cfg["token"], remote_id, capture, live_visibility) or ""
         if not live_url:
-            print("Live stream rejected — requires Pro plan or full-spectrum consent.")
+            print("Live stream rejected — requires Pro plan or Full Spectrum.")
             sys.exit(1)
+        if live_visibility == "private":
+            print(f"Live (private): {live_url}")
+            print("  Only you can view this stream while logged in.")
+        else:
+            print(f"Live (public): {live_url}")
+            print("  Anyone with this link can watch your session build in real time.")
 
     base.init(sid, live=bool(live_url))
 
@@ -1122,7 +1131,8 @@ def main() -> None:
     s.add_argument("--repo", help="Git remote URL (overrides auto-detect)")
     s.add_argument("--public", action="store_true", help="Set visibility to public")
     s.add_argument("--tags", help="Comma-separated tags")
-    s.add_argument("--live", action="store_true", help="Stream events live to platform")
+    s.add_argument("--live", action="store_true", help="Stream graph live to your private profile")
+    s.add_argument("--live-public", action="store_true", help="Stream graph live — visible to anyone with the link")
     sub.add_parser("stop", help="Stop recording")
     v = sub.add_parser("view", help="Inspect captured session data")
     v.add_argument("session_id", nargs="?")
