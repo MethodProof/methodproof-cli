@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.3] — 2026-04-05
+
+### Fixed
+- macOS hook timestamp: `date +%s.%3N` produced invalid JSON (literal `.3N`), silently dropping all tool_call, tool_result, agent_launch, and agent_complete events
+- Stale session recovery: `mp start` now detects dead daemons and cleans up instead of blocking
+- Bridge events now route through `base.emit()` for consent gating, hash chain integrity, and live streaming
+
+### Changed
+- `mp view` replaced with terminal-based session audit (no HTTP server)
+- Recording threads start after fork (fixes silent 0-event sessions on macOS)
+- Hook errors logged to `~/.methodproof/hook_errors.log` for inspection
+- Consent-blocked events logged at debug level
+
+### Added
+- Watch Scope section in README documenting directory scope and exclusion patterns
+- `store.reset_connection()` for fork-safe SQLite WAL handling
+
 ## [0.3.2] — 2026-04-04
 
 ### Changed

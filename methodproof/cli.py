@@ -455,12 +455,33 @@ def cmd_consent(args: argparse.Namespace) -> None:
     _print_commands()
 
 
+def _is_daemon_alive() -> bool:
+    """Check if the recording daemon is still running."""
+    if not PIDFILE.exists():
+        return False
+    try:
+        pid = int(PIDFILE.read_text().strip())
+        os.kill(pid, 0)  # signal 0 = check existence without killing
+        return True
+    except (ProcessLookupError, ValueError, OSError):
+        return False
+
+
 def cmd_start(args: argparse.Namespace) -> None:
     cfg = config.load()
     if cfg.get("active_session"):
-        print(f"Session active: {cfg['active_session'][:8]}")
-        print("Run `methodproof stop` first.")
-        sys.exit(1)
+        if _is_daemon_alive():
+            print(f"Session active: {cfg['active_session'][:8]}")
+            print("Run `methodproof stop` first.")
+            sys.exit(1)
+        # Daemon is dead — clean up the stale session
+        stale_sid = cfg["active_session"]
+        store.complete_session(stale_sid)
+        graph.build(stale_sid)
+        PIDFILE.unlink(missing_ok=True)
+        cfg["active_session"] = None
+        config.save(cfg)
+        print(f"Cleaned up stale session {stale_sid[:8]} (daemon was not running).")
     if not hook.is_installed():
         print("Run `methodproof init` first.")
         sys.exit(1)
@@ -548,9 +569,6 @@ def cmd_start(args: argparse.Namespace) -> None:
         from methodproof.agents import music
         threads.append(threading.Thread(target=music.start, args=(stop_event,), daemon=True))
 
-    for t in threads:
-        t.start()
-
     active = [k for k, v in capture.items() if v]
     print(f"\n{_banner()}")
     print(f"Recording: {sid[:8]}")
@@ -612,6 +630,9 @@ def cmd_start(args: argparse.Namespace) -> None:
         os.dup2(devnull, 1)
         os.dup2(devnull, 2)
         os.close(devnull)
+        store.reset_connection()
+        for t in threads:
+            t.start()
         signal.signal(signal.SIGINT, _shutdown)
         signal.signal(signal.SIGTERM, _shutdown)
         try:
@@ -623,6 +644,8 @@ def cmd_start(args: argparse.Namespace) -> None:
         return
 
     # Windows: foreground mode (no fork)
+    for t in threads:
+        t.start()
     signal.signal(signal.SIGINT, _shutdown)
     print("Press Ctrl+C or run `mp stop` to finish.")
     stopfile = config.DIR / "methodproof.stop"
@@ -675,12 +698,9 @@ def cmd_stop(args: argparse.Namespace) -> None:
 
 
 def cmd_view(args: argparse.Namespace) -> None:
-    sid = args.session_id or _latest()
-    if not sid:
-        print("No sessions. Run `methodproof start` first.")
-        sys.exit(1)
-    from methodproof.viewer import serve
-    serve(sid, port=int(args.port or 9876))
+    session = _resolve_session(args.session_id)
+    from methodproof.viewer import view
+    view(session)
 
 
 def cmd_log(args: argparse.Namespace) -> None:
@@ -971,7 +991,7 @@ def _print_summary(session: dict | None, stats: dict) -> None:
     print(f"  Events:   {session['total_events']}")
     print(f"  Duration: {_duration(session)}")
     print(f"  Graph:    {stats['next']} links, {stats['causal']} causal")
-    print(f"\nRun `methodproof view` to explore.")
+    print(f"\nRun `methodproof view` to inspect captured data.")
 
 
 CHROME_STORE_URL = "https://chromewebstore.google.com/detail/methodproof/TODO_EXTENSION_ID"
@@ -1087,9 +1107,8 @@ def main() -> None:
     s.add_argument("--tags", help="Comma-separated tags")
     s.add_argument("--live", action="store_true", help="Stream events live to platform")
     sub.add_parser("stop", help="Stop recording")
-    v = sub.add_parser("view", help="View session graph")
+    v = sub.add_parser("view", help="Inspect captured session data")
     v.add_argument("session_id", nargs="?")
-    v.add_argument("--port", default="9876")
     sub.add_parser("log", help="List sessions")
     l = sub.add_parser("login", help="Connect to platform")
     l.add_argument("--api-url")

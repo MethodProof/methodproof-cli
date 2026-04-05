@@ -71,6 +71,17 @@ def _db() -> sqlite3.Connection:
     return _conn
 
 
+def reset_connection() -> None:
+    """Close inherited DB connection after fork() — SQLite WAL is not fork-safe."""
+    global _conn
+    if _conn is not None:
+        try:
+            _conn.close()
+        except Exception:
+            pass
+        _conn = None
+
+
 def init_db() -> None:
     config.ensure_dirs()
     _db().executescript(_SCHEMA)

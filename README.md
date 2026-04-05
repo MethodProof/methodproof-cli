@@ -191,6 +191,24 @@ All sensitive metadata (prompts, completions, commands, output, diffs) is encryp
 - **AI CLIs** — codex, gemini, aider command wrappers
 - **MCP server** — registered with Claude Code for session/graph queries
 
+## Watch Scope
+
+`methodproof start` watches the **current directory recursively** (or the directory passed via `--dir`). Every file create, edit, and delete under that tree generates an event.
+
+**Start in the right directory.** If you start in a monorepo root, you'll capture events from every subdirectory. If you start in a subdirectory, parent-level changes won't be recorded.
+
+```bash
+cd my-project          # scope to this project
+methodproof start
+
+cd ~/code              # ⚠️ captures ALL projects under ~/code
+methodproof start
+```
+
+**Excluded patterns:** `__pycache__`, `.pyc`, `.git/`, `node_modules`, `.DS_Store`, `.swp`, temp files ending in `~`
+
+**Git commits** are detected by polling `.git/refs/heads/` every 2 seconds — only commits in a git repo rooted at (or above) the watch directory are captured.
+
 ## Data Directory
 
 `~/.methodproof/`

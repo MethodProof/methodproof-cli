@@ -3,12 +3,9 @@
 import json
 import secrets
 import threading
-import time
-import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
-from methodproof import store
 from methodproof.agents import base
 
 _session_id = ""
@@ -131,19 +128,14 @@ class _Handler(BaseHTTPRequestHandler):
 
         if self.path == "/events":
             events = body.get("events", [])
-            for e in events:
-                e.setdefault("id", uuid.uuid4().hex)
-                e.setdefault("timestamp", time.time())
-                e.setdefault("duration_ms", 0)
-                e.setdefault("metadata", e.get("metadata", {}))
             accepted = 0
-            if events:
-                try:
-                    store.insert_events(_session_id, events)
-                    accepted = len(events)
-                except Exception:
-                    self.send_error(500, "Storage error")
-                    return
+            for e in events:
+                etype = e.get("type", "unknown")
+                meta = e.get("metadata", {})
+                if "duration_ms" in e:
+                    meta["duration_ms"] = e["duration_ms"]
+                base.emit(etype, meta)
+                accepted += 1
             self._json({"accepted": accepted})
         elif self.path == "/pair/register":
             token = body.get("token", "")

@@ -14,9 +14,9 @@ else
   EVENT=${EVENT:-unknown}
 fi
 
-# Timestamp: millisecond precision on Linux, second precision on macOS
+# Timestamp: nanosecond precision where available, second precision fallback
 if date +%s.%N >/dev/null 2>&1 && [ "$(date +%N)" != "%N" ]; then
-  TS=$(date +%s.%3N)
+  TS=$(date +%s.%N)
 else
   TS=$(date +%s).000
 fi
@@ -73,8 +73,13 @@ else
 fi
 
 # Post to bridge with strict 1-second timeout (never block Claude Code)
-curl -s --max-time 1 --connect-timeout 0.5 \
+PAYLOAD="{\"events\":[{\"type\":\"$TYPE\",\"timestamp\":$TS,\"metadata\":$META}]}"
+RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 1 --connect-timeout 0.5 \
   -X POST http://localhost:9877/events \
   -H "Content-Type: application/json" \
-  -d "{\"events\":[{\"type\":\"$TYPE\",\"timestamp\":$TS,\"metadata\":$META}]}" \
-  >/dev/null 2>&1 || true
+  -d "$PAYLOAD" 2>/dev/null) || true
+HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+if [ -n "$HTTP_CODE" ] && [ "$HTTP_CODE" != "200" ]; then
+  echo "{\"ts\":$TS,\"level\":\"warning\",\"event\":\"hook.post_failed\",\"http_code\":\"$HTTP_CODE\",\"type\":\"$TYPE\",\"payload\":$PAYLOAD}" \
+    >> "${HOME}/.methodproof/hook_errors.log" 2>/dev/null || true
+fi

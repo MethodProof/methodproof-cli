@@ -83,6 +83,7 @@ def emit(event_type: str, metadata: dict[str, Any]) -> None:
     # Event-level consent gate
     gate = _EVENT_GATES.get(event_type)
     if gate and not _capture.get(gate, True):
+        log("debug", "emit.consent_blocked", type=event_type, gate=gate)
         return
     # Field-level consent gate — strip opted-out fields
     for category, pairs in _FIELD_GATES.items():
