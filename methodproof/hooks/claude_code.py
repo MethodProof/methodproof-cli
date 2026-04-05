@@ -11,9 +11,17 @@ import time
 import urllib.request
 
 try:
-    from methodproof.analysis import analyze_prompt
+    from methodproof.analysis import analyze_prompt, compose_summary
 except ImportError:
     analyze_prompt = lambda _: {}
+    compose_summary = lambda _: ""
+
+def _build_prompt_meta(text: str) -> dict:
+    sa = analyze_prompt(text)
+    sa["prompt_length"] = len(text)
+    sa["prompt_summary"] = compose_summary(sa)
+    return sa
+
 
 _TYPE_MAP = {
     "UserPromptSubmit": "user_prompt",
@@ -27,11 +35,7 @@ _TYPE_MAP = {
 }
 
 _META_EXTRACTORS = {
-    "UserPromptSubmit": lambda d: {
-        "prompt_preview": (d.get("prompt") or "")[:200],
-        "prompt_length": len(d.get("prompt") or ""),
-        **analyze_prompt(d.get("prompt") or ""),
-    },
+    "UserPromptSubmit": lambda d: _build_prompt_meta(d.get("prompt") or ""),
     "PreToolUse": lambda d: {"tool": d.get("tool_name", "unknown"), "tool_use_id": d.get("tool_use_id", "")},
     "PostToolUse": lambda d: {"tool": d.get("tool_name", "unknown"), "tool_use_id": d.get("tool_use_id", "")},
     "SubagentStart": lambda d: {"agent_type": d.get("agent_type", "unknown"), "agent_id": d.get("agent_id", "")},

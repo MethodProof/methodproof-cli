@@ -439,6 +439,71 @@ def analyze_prompt(text: str) -> dict[str, Any]:
     }
 
 
+def compose_summary(meta: dict[str, Any]) -> str:
+    """Compose a readable prompt summary from structural analysis fields.
+
+    Replaces dumb 200-char truncation with a meaningful, searchable summary.
+    Zero API calls — purely local composition from already-extracted sa_* fields.
+
+    Examples:
+      "[instruction/synthesis] refactor app/auth/middleware.py — dependency injection"
+      "[bug_report/execution] fix TypeError in utils.py:parse_config — Python, JSON"
+      "[design_question/analysis] caching strategy — Redis, PostgreSQL, 3 constraints"
+      "[correction] not that approach — references prior turn"
+    """
+    intent = meta.get("sa_intent", "unknown")
+    cognitive = meta.get("sa_cognitive_level", "")
+    files = meta.get("sa_named_files", [])
+    functions = meta.get("sa_named_functions", [])
+    classes = meta.get("sa_named_classes", [])
+    technologies = meta.get("sa_named_technologies", [])
+    languages = meta.get("sa_code_languages", [])
+    collab = meta.get("sa_collaboration_mode", "")
+
+    # Header: [intent/cognitive]
+    header = f"[{intent}"
+    if cognitive and cognitive != "none":
+        header += f"/{cognitive}"
+    header += "]"
+
+    # Entities: files, functions, classes, technologies
+    parts: list[str] = []
+    if files:
+        parts.extend(files[:3])
+    if functions:
+        parts.extend(functions[:2])
+    if classes:
+        parts.extend(classes[:2])
+    if technologies:
+        parts.extend(technologies[:4])
+    elif languages:
+        parts.extend(languages[:2])
+
+    # Qualifiers
+    qualifiers: list[str] = []
+    if meta.get("sa_has_error_trace"):
+        qualifiers.append(f"{meta.get('sa_error_trace_lines', 0)} error lines")
+    if meta.get("sa_has_constraints"):
+        qualifiers.append("constrained")
+    if meta.get("sa_has_acceptance_criteria"):
+        qualifiers.append("with criteria")
+    if meta.get("sa_is_compound"):
+        qualifiers.append("multi-part")
+    if meta.get("sa_references_prior_turn"):
+        qualifiers.append("references prior turn")
+    if meta.get("sa_code_block_count", 0) > 0:
+        qualifiers.append(f"{meta['sa_code_block_count']} code blocks")
+
+    # Compose
+    summary = header
+    if parts:
+        summary += " " + ", ".join(dict.fromkeys(parts))  # dedupe preserving order
+    if qualifiers:
+        summary += " — " + ", ".join(qualifiers[:3])
+
+    return summary
+
+
 def scan_environment(watch_dir: str) -> dict[str, Any]:
     """Scan filesystem for AI instruction files and config. No content stored."""
     home = Path.home()
