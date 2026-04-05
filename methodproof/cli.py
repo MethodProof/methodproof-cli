@@ -1152,6 +1152,12 @@ def main() -> None:
     ext_sub.add_parser("install", help="Open Chrome Web Store listing")
     sub.add_parser("help", help="Show command reference")
     sub.add_parser("mcp-serve", help="Run MCP server (used by Claude Code)")
+    px = sub.add_parser("proxy", help="Local AI API proxy (deep capture)")
+    px_sub = px.add_subparsers(dest="proxy_cmd")
+    px_sub.add_parser("start", help="Start proxy (requires consent)")
+    px_sub.add_parser("stop", help="Stop proxy")
+    px_sub.add_parser("status", help="Show proxy status")
+    px_sub.add_parser("cert", help="CA certificate install instructions")
 
     args = p.parse_args()
     cmds = {
@@ -1163,6 +1169,7 @@ def main() -> None:
         "extension": cmd_extension,
         "help": lambda _: _print_commands(),
         "mcp-serve": cmd_mcp_serve,
+        "proxy": lambda a: __import__("methodproof.proxy", fromlist=["cmd_proxy"]).cmd_proxy(a),
     }
     fn = cmds.get(args.cmd)
     if not fn:

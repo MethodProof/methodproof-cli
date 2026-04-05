@@ -47,6 +47,23 @@ _EVENT_GATES: dict[str, str] = {
     "music_playing": "music",
     "environment_profile": "environment_analysis",
     "prompt_outcomes": "ai_prompts",
+    "ai_cli_start": "ai_prompts",
+    "ai_cli_end": "ai_responses",
+    # Hook lifecycle events (all AI tools)
+    "user_prompt": "ai_prompts",
+    "tool_call": "ai_responses",
+    "tool_result": "ai_responses",
+    "task_start": "ai_responses",
+    "task_end": "ai_responses",
+    "agent_launch": "ai_responses",
+    "agent_complete": "ai_responses",
+    "claude_session_start": "ai_prompts",
+    "codex_session_start": "ai_prompts",
+    "codex_session_end": "ai_responses",
+    "gemini_session_start": "ai_prompts",
+    "gemini_session_end": "ai_responses",
+    "kiro_session_start": "ai_prompts",
+    "kiro_session_end": "ai_responses",
 }
 
 # Maps capture categories to (event_type, field) pairs for field-level gating.
