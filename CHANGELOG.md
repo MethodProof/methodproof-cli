@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2] — 2026-04-04
+
+### Changed
+- `websocket-client` is now a default dependency (no longer requires `pip install methodproof[live]`)
+- `mp start --live` prints a clickable dashboard URL instead of the API host
+- `live.start()` returns the dashboard URL from the platform handshake
+
 ## [0.3.1] — 2026-04-04
 
 ### Added

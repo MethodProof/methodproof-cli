@@ -12,8 +12,8 @@ _connected = threading.Event()
 _stop = threading.Event()
 
 
-def start(api_url: str, token: str, session_id: str, consent: dict[str, bool]) -> bool:
-    """Connect to platform WebSocket, perform handshake. Returns True if accepted."""
+def start(api_url: str, token: str, session_id: str, consent: dict[str, bool]) -> str | None:
+    """Connect to platform WebSocket, perform handshake. Returns live URL or None."""
     import websocket  # websocket-client
 
     ws_url = api_url.replace("https://", "wss://").replace("http://", "ws://")
@@ -32,11 +32,11 @@ def start(api_url: str, token: str, session_id: str, consent: dict[str, bool]) -
         _ws = None
         from methodproof.agents.base import log
         log("error", "live.rejected", detail=detail)
-        return False
+        return None
 
     _connected.set()
     threading.Thread(target=_sender_loop, daemon=True).start()
-    return True
+    return reply.get("url", "")
 
 
 def send(event: dict[str, Any]) -> None:

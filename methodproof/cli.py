@@ -489,6 +489,7 @@ def cmd_start(args: argparse.Namespace) -> None:
     live_ok = False
     capture = cfg.get("capture", {})
 
+    live_url = ""
     if args.live:
         if not cfg.get("token"):
             print("Live mode requires login. Run `methodproof login` first.")
@@ -500,12 +501,12 @@ def cmd_start(args: argparse.Namespace) -> None:
         store.mark_synced(sid, remote_id)
         # Connect live WebSocket
         from methodproof import live as live_mod
-        live_ok = live_mod.start(cfg["api_url"], cfg["token"], remote_id, capture)
-        if not live_ok:
+        live_url = live_mod.start(cfg["api_url"], cfg["token"], remote_id, capture) or ""
+        if not live_url:
             print("Live stream rejected — requires Pro plan or full-spectrum consent.")
             sys.exit(1)
 
-    base.init(sid, live=live_ok)
+    base.init(sid, live=bool(live_url))
 
     if capture.get("environment_analysis", True):
         from methodproof.analysis import scan_environment
@@ -559,13 +560,13 @@ def cmd_start(args: argparse.Namespace) -> None:
     print(f"Capture:   {', '.join(active)}")
     if capture.get("browser", True):
         print(f"Bridge:    http://localhost:9877")
-    if live_ok:
-        print(f"Live:      streaming to {cfg['api_url']}")
+    if live_url:
+        print(f"Live:      {live_url}")
 
     def _shutdown(sig: int, frame: object) -> None:
         stop_event.set()
         try:
-            if live_ok:
+            if live_url:
                 from methodproof import live as live_mod
                 live_mod.stop()
             base.flush()

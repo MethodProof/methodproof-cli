@@ -151,18 +151,16 @@ wheels = [
 
 [[package]]
 name = "methodproof"
-version = "0.1.0"
+version = "0.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "watchdog" },
+    { name = "websocket-client" },
 ]
 
 [package.optional-dependencies]
 e2e = [
     { name = "cryptography" },
-]
-live = [
-    { name = "websocket-client" },
 ]
 signing = [
     { name = "cryptography" },
@@ -178,9 +176,9 @@ requires-dist = [
     { name = "cryptography", marker = "extra == 'e2e'", specifier = ">=43.0" },
     { name = "cryptography", marker = "extra == 'signing'", specifier = ">=43.0" },
     { name = "watchdog", specifier = ">=4.0" },
-    { name = "websocket-client", marker = "extra == 'live'", specifier = ">=1.7" },
+    { name = "websocket-client", specifier = ">=1.7" },
 ]
-provides-extras = ["e2e", "signing", "live"]
+provides-extras = ["e2e", "signing"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.0" }]
