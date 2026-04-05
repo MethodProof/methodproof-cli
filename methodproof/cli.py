@@ -1,7 +1,7 @@
 """MethodProof CLI. See how you code.
 
 Usage:
-    methodproof init              Install hooks, configure capture + research + redaction
+    methodproof init              Install hooks, configure capture
     methodproof start [--dir .]   Start recording a session
     methodproof stop              Stop recording, build process graph
     methodproof view [id]         View session graph in browser
@@ -75,20 +75,77 @@ def _install_alias() -> None:
         f.write(alias)
 
 
+def _print_journal_intro(credits: int) -> None:
+    """Show journal mode introduction with remaining credits."""
+    print("  ┌─────────────────────────────────────────────────────┐")
+    print("  │  Journal Mode — full content capture                │")
+    print("  └─────────────────────────────────────────────────────┘")
+    print(f"  You have {credits} free journal credit{'s' if credits != 1 else ''} "
+          f"(sessions up to {config.FREE_JOURNAL_MAX_HOURS}h each).")
+    print()
+    print("  By default, MethodProof captures structural metadata only —")
+    print("  file paths, line counts, timing, tool names. Journal mode")
+    print("  preserves the full picture: prompts, AI responses, diffs,")
+    print("  and terminal output. All encrypted (AES-256-GCM).")
+    print()
+    print("  Try it:  mp start --journal")
+    print("  Toggle:  mp journal on / off / status")
+    print()
+
+
 def _run_consent(cfg: dict) -> dict:
-    """Interactive consent flow with three sections: capture, research, redaction."""
+    """Simplified consent flow: accept defaults or customize."""
+    print(f"\n{_banner()}\n")
+    print("  Built by engineers, for engineers.\n")
+    print("  All data stays local in ~/.methodproof/. Nothing leaves your")
+    print("  machine unless you explicitly run `mp push` or `mp publish`.\n")
+    print("  MethodProof records structural metadata about your workflow:")
+    print("  commands, file changes, git commits, AI interactions, and more.")
+    print("  No code content is stored by default.\n")
+
+    choice = input("  Enable recommended capture? [Y/n/c to customize]: ").strip().lower()
+
+    if choice in ("c", "customize"):
+        return _run_consent_detailed(cfg)
+
+    if choice in ("n", "no"):
+        # Minimal: only file changes + git commits
+        capture = {k: False for k in config.STANDARD_CATEGORIES}
+        capture["file_changes"] = True
+        capture["git_commits"] = True
+        capture["code_capture"] = False
+        cfg["capture"] = capture
+        cfg["research_consent"] = False
+        cfg["publish_redact"] = dict(config._DEFAULTS["publish_redact"])
+        cfg["consent_acknowledged"] = True
+        credits = cfg.get("journal_credits", config._DEFAULTS["journal_credits"])
+        print("\n  Minimal capture enabled (file changes + git commits).\n")
+        _print_journal_intro(credits)
+        print("  Customize anytime: `methodproof consent`\n")
+        return cfg
+
+    # Default: all 10 standard on, code_capture off
+    cfg["capture"] = dict(config._DEFAULTS["capture"])
+    cfg["research_consent"] = False
+    cfg["publish_redact"] = dict(config._DEFAULTS["publish_redact"])
+    cfg["consent_acknowledged"] = True
+    credits = cfg.get("journal_credits", config._DEFAULTS["journal_credits"])
+    print(f"\n  {_rainbow('Full Spectrum')} enabled — free live streaming unlocked.\n")
+    _print_journal_intro(credits)
+    print("  Customize anytime: `methodproof consent`\n")
+    return cfg
+
+
+def _run_consent_detailed(cfg: dict) -> dict:
+    """Full interactive consent flow with three sections: capture, research, redaction."""
     capture = cfg.get("capture", dict(config._DEFAULTS["capture"]))
     publish_redact = cfg.get("publish_redact", dict(config._DEFAULTS["publish_redact"]))
     std = config.STANDARD_CATEGORIES
 
-    print(f"\n{_banner()}\n")
-    print("Built by engineers, for engineers.\n")
-    print("All data stays local in ~/.methodproof/. Nothing leaves your")
-    print("machine unless you explicitly run `mp push` or `mp publish`.\n")
-
     # --- Section 1: Capture ---
+    print()
     print("=" * 60)
-    print("  SECTION 1: What gets recorded locally")
+    print("  What gets recorded locally")
     print("=" * 60)
     print()
     print("  These 10 categories are structural metadata only.")
@@ -143,7 +200,7 @@ def _run_consent(cfg: dict) -> dict:
 
     # --- Section 2: Research Data ---
     print("=" * 60)
-    print("  SECTION 2: Contribute to AI research (optional)")
+    print("  Contribute to AI research (optional)")
     print("=" * 60)
     print()
 
@@ -171,7 +228,7 @@ def _run_consent(cfg: dict) -> dict:
 
     # --- Section 3: Publish Redaction ---
     print("=" * 60)
-    print("  SECTION 3: Default redactions for public sessions")
+    print("  Default redactions for public sessions")
     print("=" * 60)
     print()
     print("  `mp push` uploads privately to your account (nothing public).")
@@ -312,8 +369,9 @@ def _print_commands() -> None:
     print(f"    {_G}mp stop{R}               Stop recording, build process graph")
     print(f"    {_G}mp start --live{R}        Stream your graph privately (only you can view)")
     print(f"    {_G}mp start --live-public{R} Stream your graph publicly (shareable link)")
-    print(f"    {_G}mp start --journal{R}    Full content capture for this session (Pro+)")
-    print(f"    {_G}mp journal on{R}         Enable persistent journal mode (Pro+)")
+    print(f"    {_G}mp start --journal{R}    Full content capture (2 free credits, then Pro)")
+    print(f"    {_G}mp journal on{R}         Enable persistent journal mode")
+    print(f"    {_G}mp journal status{R}     Check journal mode and remaining credits")
     print()
     print(f"  {_W}REVIEW{R}")
     print(f"    {_C}mp view{R}  {_D}[id]{R}          View session graph in browser")
@@ -452,16 +510,18 @@ def cmd_uninstall(args: argparse.Namespace) -> None:
 def cmd_consent(args: argparse.Namespace) -> None:
     """Review or change capture, research, and redaction settings."""
     cfg = config.load()
-    cfg = _run_consent(cfg)
+    print(f"\n{_banner()}\n")
+    cfg = _run_consent_detailed(cfg)
     config.save(cfg)
     print(f"\n{_banner()} settings saved.\n")
     _print_commands()
 
 
 def cmd_journal(args: argparse.Namespace) -> None:
-    """Journal mode — full content capture (Pro+)."""
+    """Journal mode — full content capture."""
     subcmd = getattr(args, "journal_cmd", None)
     cfg = config.load()
+    credits = cfg.get("journal_credits", 0)
 
     if subcmd == "on":
         print("Journal Mode — Full Content Capture\n")
@@ -471,8 +531,13 @@ def cmd_journal(args: argparse.Namespace) -> None:
         print("  • Full file diffs and git patches")
         print("  • Terminal output (not just commands)")
         print("  • Tool call parameters and results\n")
-        print("All content is encrypted (AES-256-GCM) and subject to your consent settings.")
-        print("Requires Pro plan or higher.\n")
+        print("All content is encrypted (AES-256-GCM) and subject to your consent settings.\n")
+        if credits > 0:
+            print(f"You have {credits} free journal credit{'s' if credits != 1 else ''} "
+                  f"(sessions up to {config.FREE_JOURNAL_MAX_HOURS}h each).")
+            print("After credits are used, journal mode requires a Pro plan.\n")
+        else:
+            print("Journal mode requires a Pro plan (or free credits if available).\n")
         answer = input("Enable journal mode? [y/N] ").strip().lower()
         if answer != "y":
             print("Journal mode not enabled.")
@@ -496,6 +561,9 @@ def cmd_journal(args: argparse.Namespace) -> None:
             print("Journal mode: OFF (structural only)")
             print("  Only metadata captured: lengths, types, timing, file paths.")
             print("  Enable with: methodproof journal on")
+        if credits > 0:
+            print(f"  Free journal credits: {credits} "
+                  f"(up to {config.FREE_JOURNAL_MAX_HOURS}h per session)")
 
     else:
         print("Usage: methodproof journal [on|off|status]")
@@ -584,8 +652,13 @@ def cmd_start(args: argparse.Namespace) -> None:
     # Journal mode — per-session override or persistent config
     if getattr(args, "journal", False):
         cfg["journal_mode"] = True
+        credits = cfg.get("journal_credits", 0)
+        if credits > 0:
+            cfg["journal_credits"] = credits - 1
+            print(f"Journal mode ON (free credit used — {credits - 1} remaining, {config.FREE_JOURNAL_MAX_HOURS}h cap).")
+        else:
+            print("Journal mode ON for this session (full content capture).")
         config.save(cfg)
-        print("Journal mode ON for this session (full content capture).")
 
     base.init(sid, live=bool(live_url))
 
@@ -1184,7 +1257,7 @@ def main() -> None:
     s.add_argument("--tags", help="Comma-separated tags")
     s.add_argument("--live", action="store_true", help="Stream graph live to your private profile")
     s.add_argument("--live-public", action="store_true", help="Stream graph live — visible to anyone with the link")
-    s.add_argument("--journal", action="store_true", help="Journal mode for this session (full content capture, Pro+)")
+    s.add_argument("--journal", action="store_true", help="Journal mode — full content capture (2 free credits, then Pro)")
     sub.add_parser("stop", help="Stop recording")
     v = sub.add_parser("view", help="Inspect captured session data")
     v.add_argument("session_id", nargs="?")
@@ -1212,7 +1285,7 @@ def main() -> None:
     ext_sub.add_parser("pair", help="Pair extension to active session")
     ext_sub.add_parser("status", help="Check extension connection")
     ext_sub.add_parser("install", help="Open Chrome Web Store listing")
-    jr = sub.add_parser("journal", help="Journal mode — full content capture (Pro+)")
+    jr = sub.add_parser("journal", help="Journal mode — full content capture (2 free credits, then Pro)")
     jr_sub = jr.add_subparsers(dest="journal_cmd")
     jr_sub.add_parser("on", help="Enable journal mode (persists full content)")
     jr_sub.add_parser("off", help="Disable journal mode (structural only)")

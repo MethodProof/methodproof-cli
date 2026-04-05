@@ -34,6 +34,7 @@ _DEFAULTS: dict[str, Any] = {
     },
     "research_consent": False,
     "journal_mode": False,
+    "journal_credits": 2,
     "publish_redact": {
         "command_output": True,
         "ai_prompts": True,
@@ -41,6 +42,8 @@ _DEFAULTS: dict[str, Any] = {
         "code_capture": True,
     },
 }
+
+FREE_JOURNAL_MAX_HOURS = 4
 
 # The 10 standard categories (excludes code_capture)
 STANDARD_CATEGORIES = [
