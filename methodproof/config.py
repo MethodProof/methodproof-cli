@@ -33,6 +33,7 @@ _DEFAULTS: dict[str, Any] = {
         "code_capture": False,
     },
     "research_consent": False,
+    "journal_mode": False,
     "publish_redact": {
         "command_output": True,
         "ai_prompts": True,
@@ -61,6 +62,30 @@ CAPTURE_DESCRIPTIONS: dict[str, str] = {
     "music": "Now Playing track and artist (Spotify, Apple Music, etc.)",
     "environment_analysis": "Structural profile of your AI dev environment: instruction file sizes, tool counts, config fingerprints (no file content stored)",
     "code_capture": "Full file diffs and git patches (Pro only, encrypted, private by default)",
+}
+
+# Content fields that Journal Mode unlocks. When journal_mode is OFF (default),
+# these fields are stripped to structural equivalents (e.g., prompt_text → prompt_length only).
+# When journal_mode is ON (Pro+), full content is persisted and encrypted.
+JOURNAL_CONTENT_FIELDS: dict[str, list[tuple[str, str]]] = {
+    "ai_prompts": [
+        ("llm_prompt", "prompt_text"),
+        ("agent_prompt", "prompt_preview"),
+        ("user_prompt", "prompt_preview"),
+    ],
+    "ai_responses": [
+        ("llm_completion", "response_text"),
+        ("agent_completion", "response_preview"),
+        ("agent_tool_dispatch", "tool_input_preview"),
+        ("agent_tool_result", "result_preview"),
+    ],
+    "command_output": [
+        ("terminal_cmd", "output_snippet"),
+    ],
+    "code_capture": [
+        ("file_edit", "diff"),
+        ("git_commit", "diff"),
+    ],
 }
 
 

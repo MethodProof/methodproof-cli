@@ -74,9 +74,11 @@ _FIELD_GATES: dict[str, list[tuple[str, str]]] = {
     "code_capture": [("file_edit", "diff"), ("git_commit", "diff")],
 }
 
+_journal_mode = False
+
 
 def init(session_id: str, live: bool = False) -> None:
-    global _session_id, _initialized, _e2e_key, _capture, _live_mode, _prev_hash
+    global _session_id, _initialized, _e2e_key, _capture, _live_mode, _prev_hash, _journal_mode
     _session_id = session_id
     _initialized = True
     _live_mode = live
@@ -86,6 +88,7 @@ def init(session_id: str, live: bool = False) -> None:
     raw = cfg.get("e2e_key", "")
     _e2e_key = bytes.fromhex(raw) if raw else None
     _capture = cfg.get("capture", {})
+    _journal_mode = cfg.get("journal_mode", False)
 
 
 def log(level: str, event: str, **kw: object) -> None:
@@ -107,6 +110,15 @@ def emit(event_type: str, metadata: dict[str, Any]) -> None:
         for etype, field in pairs:
             if event_type == etype and not _capture.get(category, True):
                 metadata.pop(field, None)
+
+    # Journal mode gate — strip content fields when journal is OFF (default).
+    # Structural equivalents (prompt_length, etc.) are always kept.
+    if not _journal_mode:
+        from methodproof.config import JOURNAL_CONTENT_FIELDS
+        for _category, pairs in JOURNAL_CONTENT_FIELDS.items():
+            for etype, field in pairs:
+                if event_type == etype and field in metadata:
+                    metadata.pop(field, None)
 
     entry = {
         "id": uuid.uuid4().hex,

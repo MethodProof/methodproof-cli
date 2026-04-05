@@ -312,6 +312,8 @@ def _print_commands() -> None:
     print(f"    {_G}mp stop{R}               Stop recording, build process graph")
     print(f"    {_G}mp start --live{R}        Stream your graph privately (only you can view)")
     print(f"    {_G}mp start --live-public{R} Stream your graph publicly (shareable link)")
+    print(f"    {_G}mp start --journal{R}    Full content capture for this session (Pro+)")
+    print(f"    {_G}mp journal on{R}         Enable persistent journal mode (Pro+)")
     print()
     print(f"  {_W}REVIEW{R}")
     print(f"    {_C}mp view{R}  {_D}[id]{R}          View session graph in browser")
@@ -456,6 +458,49 @@ def cmd_consent(args: argparse.Namespace) -> None:
     _print_commands()
 
 
+def cmd_journal(args: argparse.Namespace) -> None:
+    """Journal mode — full content capture (Pro+)."""
+    subcmd = getattr(args, "journal_cmd", None)
+    cfg = config.load()
+
+    if subcmd == "on":
+        print("Journal Mode — Full Content Capture\n")
+        print("When enabled, MethodProof persists full content alongside structural data:")
+        print("  • Full prompt text (not just length)")
+        print("  • Full AI completion text (not just length)")
+        print("  • Full file diffs and git patches")
+        print("  • Terminal output (not just commands)")
+        print("  • Tool call parameters and results\n")
+        print("All content is encrypted (AES-256-GCM) and subject to your consent settings.")
+        print("Requires Pro plan or higher.\n")
+        answer = input("Enable journal mode? [y/N] ").strip().lower()
+        if answer != "y":
+            print("Journal mode not enabled.")
+            return
+        cfg["journal_mode"] = True
+        config.save(cfg)
+        print("\nJournal mode ON. Full content will be captured in your next session.")
+        print("Run `methodproof start` to begin recording.\n")
+
+    elif subcmd == "off":
+        cfg["journal_mode"] = False
+        config.save(cfg)
+        print("Journal mode OFF. Only structural metadata will be captured.")
+
+    elif subcmd == "status":
+        enabled = cfg.get("journal_mode", False)
+        if enabled:
+            print("Journal mode: ON (full content capture)")
+            print("  Prompts, completions, diffs, and output are persisted and encrypted.")
+        else:
+            print("Journal mode: OFF (structural only)")
+            print("  Only metadata captured: lengths, types, timing, file paths.")
+            print("  Enable with: methodproof journal on")
+
+    else:
+        print("Usage: methodproof journal [on|off|status]")
+
+
 def _is_daemon_alive() -> bool:
     """Check if the recording daemon is still running."""
     if not PIDFILE.exists():
@@ -535,6 +580,12 @@ def cmd_start(args: argparse.Namespace) -> None:
         else:
             print(f"Live (public): {live_url}")
             print("  Anyone with this link can watch your session build in real time.")
+
+    # Journal mode — per-session override or persistent config
+    if getattr(args, "journal", False):
+        cfg["journal_mode"] = True
+        config.save(cfg)
+        print("Journal mode ON for this session (full content capture).")
 
     base.init(sid, live=bool(live_url))
 
@@ -1133,6 +1184,7 @@ def main() -> None:
     s.add_argument("--tags", help="Comma-separated tags")
     s.add_argument("--live", action="store_true", help="Stream graph live to your private profile")
     s.add_argument("--live-public", action="store_true", help="Stream graph live — visible to anyone with the link")
+    s.add_argument("--journal", action="store_true", help="Journal mode for this session (full content capture, Pro+)")
     sub.add_parser("stop", help="Stop recording")
     v = sub.add_parser("view", help="Inspect captured session data")
     v.add_argument("session_id", nargs="?")
@@ -1160,6 +1212,11 @@ def main() -> None:
     ext_sub.add_parser("pair", help="Pair extension to active session")
     ext_sub.add_parser("status", help="Check extension connection")
     ext_sub.add_parser("install", help="Open Chrome Web Store listing")
+    jr = sub.add_parser("journal", help="Journal mode — full content capture (Pro+)")
+    jr_sub = jr.add_subparsers(dest="journal_cmd")
+    jr_sub.add_parser("on", help="Enable journal mode (persists full content)")
+    jr_sub.add_parser("off", help="Disable journal mode (structural only)")
+    jr_sub.add_parser("status", help="Show journal mode status")
     sub.add_parser("help", help="Show command reference")
     sub.add_parser("mcp-serve", help="Run MCP server (used by Claude Code)")
     px = sub.add_parser("proxy", help="Local AI API proxy (deep capture)")
@@ -1177,6 +1234,7 @@ def main() -> None:
         "delete": cmd_delete, "review": cmd_review, "consent": cmd_consent,
         "update": cmd_update, "uninstall": cmd_uninstall,
         "extension": cmd_extension,
+        "journal": cmd_journal,
         "help": lambda _: _print_commands(),
         "mcp-serve": cmd_mcp_serve,
         "proxy": lambda a: __import__("methodproof.proxy", fromlist=["cmd_proxy"]).cmd_proxy(a),
