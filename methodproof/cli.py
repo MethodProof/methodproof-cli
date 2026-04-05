@@ -11,6 +11,9 @@ Usage:
     methodproof push [id]         Upload privately to your account
     methodproof publish [id]      Make session public (applies redaction defaults)
     methodproof consent           Review or change capture, research, and redaction settings
+    methodproof extension pair    Pair browser extension to active session
+    methodproof extension status  Check extension connection
+    methodproof extension install Open Chrome Web Store listing
 """
 
 import argparse
@@ -319,6 +322,11 @@ def _print_commands() -> None:
     print(f"    {_Y}mp publish{R} {_D}[id]{R}        Make session public (redaction applied)")
     print(f"    {_Y}mp tag{R} {_D}<id> <tags>{R}     Tag a session")
     print()
+    print(f"  {_W}EXTENSION{R}")
+    print(f"    {_C}mp extension pair{R}      Pair browser extension to active session")
+    print(f"    {_C}mp extension status{R}    Check extension connection")
+    print(f"    {_C}mp extension install{R}   Open Chrome Web Store")
+    print()
     print(f"  {_W}ACCOUNT{R}")
     print(f"    {_M}mp login{R}              Connect to platform (opens browser)")
     print(f"    {_M}mp consent{R}            Change capture, research, and redaction settings")
@@ -344,6 +352,11 @@ def _print_commands_plain() -> None:
     print("    mp push  [id]         Upload privately to your account")
     print("    mp publish [id]       Make session public (redaction applied)")
     print("    mp tag <id> <tags>    Tag a session")
+    print()
+    print("  EXTENSION")
+    print("    mp extension pair     Pair browser extension to active session")
+    print("    mp extension status   Check extension connection")
+    print("    mp extension install  Open Chrome Web Store")
     print()
     print("  ACCOUNT")
     print("    mp login              Connect to platform (opens browser)")
@@ -524,7 +537,10 @@ def cmd_start(args: argparse.Namespace) -> None:
     # Bridge — if browser category enabled
     if capture.get("browser", True):
         from methodproof import bridge
-        threads.append(threading.Thread(target=bridge.start, args=(sid, stop_event, 9877), daemon=True))
+        threads.append(threading.Thread(target=bridge.start, args=(
+            sid, stop_event, 9877,
+            cfg.get("token", ""), cfg.get("api_url", ""), cfg.get("e2e_key", ""),
+        ), daemon=True))
 
     # Music — if music category enabled
     if capture.get("music", True):
@@ -545,32 +561,72 @@ def cmd_start(args: argparse.Namespace) -> None:
         print(f"Bridge:    http://localhost:9877")
     if live_ok:
         print(f"Live:      streaming to {cfg['api_url']}")
-    print("Press Ctrl+C or run `methodproof stop` to finish.")
 
     def _shutdown(sig: int, frame: object) -> None:
         stop_event.set()
-        if live_ok:
-            from methodproof import live as live_mod
-            live_mod.stop()
-        base.flush()
-        store.complete_session(sid)
-        stats = graph.build(sid)
-        session = store.get_session(sid)
-        cfg = config.load()
-        cfg["active_session"] = None
-        config.save(cfg)
+        try:
+            if live_ok:
+                from methodproof import live as live_mod
+                live_mod.stop()
+            base.flush()
+            store.complete_session(sid)
+            graph.build(sid)
+        except Exception:
+            pass
+        try:
+            cfg_now = config.load()
+            cfg_now["active_session"] = None
+            config.save(cfg_now)
+        except Exception:
+            pass
         PIDFILE.unlink(missing_ok=True)
-        _print_summary(session, stats)
         sys.exit(0)
 
-    signal.signal(signal.SIGINT, _shutdown)
-    if hasattr(signal, "SIGTERM"):
+    # Daemonize: fork into background so the terminal is free
+    if sys.platform != "win32":
+        child = os.fork()
+        if child > 0:
+            # Parent: write child PID and exit
+            PIDFILE.write_text(str(child))
+            # Brief pause for extension auto-discovery (extension polls every ~6s in dev)
+            if capture.get("browser", True):
+                import urllib.request as _ur
+                time.sleep(8)
+                try:
+                    with _ur.urlopen("http://127.0.0.1:9877/extension-status", timeout=2) as resp:
+                        ext_data = json.loads(resp.read())
+                    if ext_data.get("paired"):
+                        print(f"Extension: connected")
+                    else:
+                        print(f"Extension: not detected — run `mp extension pair` or install from store")
+                except Exception:
+                    print(f"Extension: not detected")
+            print("Run `mp stop` to finish.")
+            return
+        # Child: detach and run in background
+        os.setsid()
+        # Redirect stdio to /dev/null so writes don't fail after terminal closes
+        devnull = os.open(os.devnull, os.O_RDWR)
+        os.dup2(devnull, 0)
+        os.dup2(devnull, 1)
+        os.dup2(devnull, 2)
+        os.close(devnull)
+        signal.signal(signal.SIGINT, _shutdown)
         signal.signal(signal.SIGTERM, _shutdown)
+        try:
+            while not stop_event.is_set():
+                time.sleep(5)
+                base.flush()
+        except Exception:
+            _shutdown(0, None)
+        return
 
+    # Windows: foreground mode (no fork)
+    signal.signal(signal.SIGINT, _shutdown)
+    print("Press Ctrl+C or run `mp stop` to finish.")
     stopfile = config.DIR / "methodproof.stop"
     while not stop_event.is_set():
-        # Windows: check for stop sentinel since SIGTERM doesn't work
-        if sys.platform == "win32" and stopfile.exists():
+        if stopfile.exists():
             stopfile.unlink(missing_ok=True)
             _shutdown(0, None)
         time.sleep(5)
@@ -917,6 +973,107 @@ def _print_summary(session: dict | None, stats: dict) -> None:
     print(f"\nRun `methodproof view` to explore.")
 
 
+CHROME_STORE_URL = "https://chromewebstore.google.com/detail/methodproof/TODO_EXTENSION_ID"
+
+
+def cmd_extension(args: argparse.Namespace) -> None:
+    import json as _json
+    import urllib.request
+    import webbrowser
+
+    ext_cmd = getattr(args, "ext_cmd", None)
+
+    if ext_cmd == "install":
+        print(f"Opening Chrome Web Store...\n  {CHROME_STORE_URL}")
+        webbrowser.open(CHROME_STORE_URL)
+        return
+
+    if ext_cmd == "status":
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:9877/extension-status", timeout=2) as resp:
+                data = _json.loads(resp.read())
+            print("Extension: paired" if data.get("paired") else "Extension: not paired")
+        except Exception:
+            print("Bridge not running. Start a session first (`mp start`).")
+        return
+
+    if ext_cmd == "pair":
+        cfg = config.load()
+        sid = cfg.get("active_session")
+        if not sid:
+            print("No active session. Run `mp start` first.")
+            sys.exit(1)
+
+        # Check bridge is running
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:9877/session", timeout=2) as resp:
+                bridge_data = _json.loads(resp.read())
+            if not bridge_data.get("active"):
+                print("Bridge not active. Is browser capture enabled?")
+                sys.exit(1)
+        except Exception:
+            print("Bridge not running. Ensure browser capture is enabled in consent settings.")
+            sys.exit(1)
+
+        # Get API credentials for the extension
+        api_token = cfg.get("token", "")
+        api_base = cfg.get("api_url", "https://api.methodproof.com")
+        e2e_key = cfg.get("e2e_key", "")
+
+        # For live sessions, use the remote session ID
+        session = store.get_session(sid)
+        pair_session_id = session["remote_id"] if session and session.get("remote_id") else sid
+
+        # Register pairing token with the running bridge via HTTP
+        import secrets as _secrets
+        token = _secrets.token_urlsafe(16)
+        reg_body = _json.dumps({
+            "token": token, "session_id": pair_session_id,
+            "api_token": api_token, "api_base": api_base, "e2e_key": e2e_key,
+        }).encode()
+        req = urllib.request.Request(
+            "http://127.0.0.1:9877/pair/register", data=reg_body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            urllib.request.urlopen(req, timeout=3)
+        except Exception:
+            print("Failed to register pairing token with bridge.")
+            sys.exit(1)
+        url = f"http://localhost:9877/pair?token={token}"
+
+        print(f"\n{_banner()}")
+        print(f"Pairing extension to session {pair_session_id[:8]}...")
+        print(f"\nOpening browser...\n  {url}\n")
+        webbrowser.open(url)
+
+        # Wait for pairing confirmation (up to 60s)
+        print("Waiting for extension...", end="", flush=True)
+        for _ in range(30):
+            time.sleep(2)
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:9877/extension-status", timeout=2) as resp:
+                    data = _json.loads(resp.read())
+                if data.get("paired"):
+                    print(" paired!\n")
+                    print("Browser telemetry is now captured for this session.")
+                    print("The extension popup shows session status.")
+                    return
+            except Exception:
+                pass
+            print(".", end="", flush=True)
+
+        print("\n\nPairing timed out. Make sure the MethodProof extension is installed.")
+        print(f"Install it: mp extension install")
+        return
+
+    # No subcommand — show help
+    print("Usage: methodproof extension <pair|status|install>")
+    print("  pair     Pair browser extension to active session")
+    print("  status   Check extension connection")
+    print("  install  Open Chrome Web Store listing")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="methodproof", description=_banner())
     sub = p.add_subparsers(dest="cmd")
@@ -951,6 +1108,11 @@ def main() -> None:
     sub.add_parser("update", help="Update to the latest version from PyPI")
     un = sub.add_parser("uninstall", help="Remove all hooks, data, and config")
     un.add_argument("--force", "-f", action="store_true", help="Skip confirmation")
+    ext = sub.add_parser("extension", help="Browser extension pairing and status")
+    ext_sub = ext.add_subparsers(dest="ext_cmd")
+    ext_sub.add_parser("pair", help="Pair extension to active session")
+    ext_sub.add_parser("status", help="Check extension connection")
+    ext_sub.add_parser("install", help="Open Chrome Web Store listing")
     sub.add_parser("help", help="Show command reference")
     sub.add_parser("mcp-serve", help="Run MCP server (used by Claude Code)")
 
@@ -961,6 +1123,7 @@ def main() -> None:
         "push": cmd_push, "tag": cmd_tag, "publish": cmd_publish,
         "delete": cmd_delete, "review": cmd_review, "consent": cmd_consent,
         "update": cmd_update, "uninstall": cmd_uninstall,
+        "extension": cmd_extension,
         "help": lambda _: _print_commands(),
         "mcp-serve": cmd_mcp_serve,
     }
