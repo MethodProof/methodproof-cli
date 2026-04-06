@@ -509,15 +509,20 @@ def cmd_uninstall(args: argparse.Namespace) -> None:
     """Remove all MethodProof hooks, data, and config."""
     import shutil
 
+    keep_sessions = getattr(args, "keep_sessions", False)
+
     if not args.force:
         sessions = store.list_sessions()
         unsynced = [s for s in sessions if not s["synced"]]
-        if unsynced:
-            print(f"  Warning: {len(unsynced)} session(s) not pushed to platform.")
-        answer = input("\n  Remove all MethodProof data and hooks? [y/N]: ").strip().lower()
+        if sessions:
+            print(f"  {len(sessions)} session(s) on disk ({len(unsynced)} not pushed).")
+        answer = input("\n  Remove all MethodProof hooks and config? [y/N]: ").strip().lower()
         if answer not in ("y", "yes"):
             print("  Cancelled.")
             return
+        if sessions and not keep_sessions:
+            keep = input("  Keep session data? [Y/n]: ").strip().lower()
+            keep_sessions = keep != "n"
 
     removed = []
 
@@ -572,14 +577,29 @@ def cmd_uninstall(args: argparse.Namespace) -> None:
 
     # Data directory
     if config.DIR.exists():
-        shutil.rmtree(config.DIR)
-        removed.append(str(config.DIR))
+        if keep_sessions and config.DB_PATH.exists():
+            # Remove everything except the session database
+            for item in config.DIR.iterdir():
+                if item == config.DB_PATH:
+                    continue
+                if item.is_dir():
+                    shutil.rmtree(item)
+                else:
+                    item.unlink()
+                removed.append(str(item))
+            removed.append(f"Kept: {config.DB_PATH}")
+        else:
+            shutil.rmtree(config.DIR)
+            removed.append(str(config.DIR))
 
     if removed:
         print("\n  Removed:")
         for r in removed:
             print(f"    {r}")
     print("\n  To remove the CLI itself: pip uninstall methodproof")
+    if keep_sessions:
+        print(f"  Session data preserved at: {config.DB_PATH}")
+        print("  Re-install and run `mp init` to resume.")
     print("  Restart your shell to clear hooks.\n")
 
 
@@ -1425,6 +1445,7 @@ def main() -> None:
     rs.add_argument("--force", "-f", action="store_true", help="Skip confirmation")
     un = sub.add_parser("uninstall", help="Remove all hooks, data, and config")
     un.add_argument("--force", "-f", action="store_true", help="Skip confirmation")
+    un.add_argument("--keep-sessions", action="store_true", help="Preserve session database")
     ext = sub.add_parser("extension", help="Browser extension pairing and status")
     ext_sub = ext.add_subparsers(dest="ext_cmd")
     ext_sub.add_parser("pair", help="Pair extension to active session")
