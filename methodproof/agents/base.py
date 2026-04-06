@@ -77,6 +77,20 @@ _FIELD_GATES: dict[str, list[tuple[str, str]]] = {
 }
 
 
+def _load_encryption_key(cfg: dict) -> bytes | None:
+    """Load db_key from keychain (preferred) or legacy e2e_key config."""
+    account_id = cfg.get("account_id", "")
+    if account_id and cfg.get("master_key_fingerprint"):
+        from methodproof.keychain import load_secret
+        from methodproof.kdf import derive_master, derive_db_key
+        master_entropy = load_secret(account_id)
+        if master_entropy:
+            master = derive_master(master_entropy)
+            return derive_db_key(master, account_id)
+    raw = cfg.get("e2e_key", "")
+    return bytes.fromhex(raw) if raw else None
+
+
 def init(session_id: str, live: bool = False) -> None:
     global _session_id, _initialized, _e2e_key, _capture, _live_mode, _prev_hash, _journal_mode, _account_id
     _session_id = session_id
@@ -85,8 +99,7 @@ def init(session_id: str, live: bool = False) -> None:
     _prev_hash = "genesis"
     from methodproof import config
     cfg = config.load()
-    raw = cfg.get("e2e_key", "")
-    _e2e_key = bytes.fromhex(raw) if raw else None
+    _e2e_key = _load_encryption_key(cfg)
     _capture = cfg.get("capture", {})
     _journal_mode = cfg.get("journal_mode", False)
     _account_id = cfg.get("account_id", "")

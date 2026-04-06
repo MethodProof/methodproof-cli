@@ -737,6 +737,72 @@ def _require_auth(cfg: dict) -> str:
     return account_id
 
 
+def _setup_master_key(cfg: dict) -> None:
+    """Generate or recover master key on first login. Shows recovery phrase once."""
+    account_id = cfg.get("account_id", "")
+    if not account_id:
+        return
+    from methodproof.keychain import has_secret, store_secret, load_secret
+    if has_secret(account_id):
+        # Already set up — ensure fingerprint is in config
+        if not cfg.get("master_key_fingerprint"):
+            from methodproof.kdf import derive_master, derive_db_key
+            from methodproof.crypto import fingerprint
+            master = derive_master(load_secret(account_id))
+            cfg["master_key_fingerprint"] = fingerprint(derive_db_key(master, account_id))
+            config.save(cfg)
+        return
+
+    # Check if user has a recovery phrase (returning user, new device)
+    if cfg.get("master_key_fingerprint"):
+        _recover_master_key(cfg, account_id)
+        return
+
+    # First time — generate entropy, show recovery phrase
+    entropy = os.urandom(16)
+    from methodproof.bip39 import entropy_to_phrase
+    phrase = entropy_to_phrase(entropy)
+    store_secret(account_id, entropy)
+
+    from methodproof.kdf import derive_master, derive_db_key
+    from methodproof.crypto import fingerprint
+    master = derive_master(entropy)
+    cfg["master_key_fingerprint"] = fingerprint(derive_db_key(master, account_id))
+    config.save(cfg)
+
+    W = "\033[1;97m"
+    Y = "\033[93m"
+    D = "\033[90m"
+    R = _RESET
+    print(f"  ┌──────────────────────────────────────────────────┐")
+    print(f"  │  {W}RECOVERY PHRASE — WRITE THIS DOWN{R}               │")
+    print(f"  │                                                  │")
+    print(f"  │  {Y}{phrase}{R}")
+    print(f"  │                                                  │")
+    print(f"  │  {D}This is the only way to recover your data{R}      │")
+    print(f"  │  {D}on a new device. Store it somewhere safe.{R}      │")
+    print(f"  └──────────────────────────────────────────────────┘\n")
+
+
+def _recover_master_key(cfg: dict, account_id: str) -> None:
+    """Prompt for recovery phrase to restore master key on new device."""
+    print("\n  Master key not found on this device.")
+    print("  Enter your 12-word recovery phrase to restore access.\n")
+    phrase = input("  Recovery phrase: ").strip()
+    if not phrase:
+        print("  Skipped. Encrypted session data will be inaccessible.")
+        return
+    from methodproof.bip39 import phrase_to_entropy
+    try:
+        entropy = phrase_to_entropy(phrase)
+    except ValueError as e:
+        print(f"  Invalid phrase: {e}")
+        return
+    from methodproof.keychain import store_secret
+    store_secret(account_id, entropy)
+    print("  Master key restored.\n")
+
+
 def _is_daemon_alive() -> bool:
     """Check if the recording daemon is still running."""
     if not PIDFILE.exists():
@@ -1058,8 +1124,13 @@ def cmd_login(args: argparse.Namespace) -> None:
                 cfg["token"] = poll["token"]
                 cfg["refresh_token"] = poll.get("refresh_token", "")
                 cfg["api_url"] = api
+                # Extract account_id and persist auth timestamp
+                claims = _decode_jwt_claims(poll["token"])
+                cfg["account_id"] = claims.get("user_id", "")
+                cfg["last_auth_at"] = time.time()
                 config.save(cfg)
                 print(" done.\n")
+                _setup_master_key(cfg)
                 print("Logged in. Run `methodproof push` to upload sessions.")
                 return
         except Exception:

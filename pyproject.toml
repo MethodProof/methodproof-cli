@@ -3,13 +3,11 @@ name = "methodproof"
 version = "0.4.5"
 description = "See how you code. Capture and visualize your engineering process."
 requires-python = ">=3.11"
-dependencies = ["watchdog>=4.0", "websocket-client>=1.7"]
+dependencies = ["watchdog>=4.0", "websocket-client>=1.7", "cryptography>=43.0", "keyring>=25.0"]
 license = "Apache-2.0"
 readme = "README.md"
 
 [project.optional-dependencies]
-e2e = ["cryptography>=43.0"]
-signing = ["cryptography>=43.0"]
 proxy = ["mitmproxy>=10.0"]
 
 [dependency-groups]

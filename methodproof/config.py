@@ -18,7 +18,8 @@ _DEFAULTS: dict[str, Any] = {
     "refresh_token": "",
     "email": "",
     "active_session": None,
-    "e2e_key": "",
+    "e2e_key": "",  # legacy — new installs use keychain-derived keys
+    "master_key_fingerprint": "",
     "capture": {
         "terminal_commands": True,
         "command_output": True,
