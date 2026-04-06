@@ -36,6 +36,8 @@ _DEFAULTS: dict[str, Any] = {
     "journal_mode": False,
     "journal_credits": 2,
     "auto_update": False,
+    "account_id": "",
+    "last_auth_at": 0,
     "publish_redact": {
         "command_output": True,
         "ai_prompts": True,

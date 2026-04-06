@@ -19,6 +19,8 @@ _buffer: list[dict[str, Any]] = []
 _FLUSH_SIZE = 50
 _MAX_RETRIES = 3
 _prev_hash = "genesis"
+_account_id = ""
+_journal_mode = False
 
 # Maps event types to the capture category that gates them
 _EVENT_GATES: dict[str, str] = {
@@ -74,11 +76,9 @@ _FIELD_GATES: dict[str, list[tuple[str, str]]] = {
     "code_capture": [("file_edit", "diff"), ("git_commit", "diff")],
 }
 
-_journal_mode = False
-
 
 def init(session_id: str, live: bool = False) -> None:
-    global _session_id, _initialized, _e2e_key, _capture, _live_mode, _prev_hash, _journal_mode
+    global _session_id, _initialized, _e2e_key, _capture, _live_mode, _prev_hash, _journal_mode, _account_id
     _session_id = session_id
     _initialized = True
     _live_mode = live
@@ -89,6 +89,7 @@ def init(session_id: str, live: bool = False) -> None:
     _e2e_key = bytes.fromhex(raw) if raw else None
     _capture = cfg.get("capture", {})
     _journal_mode = cfg.get("journal_mode", False)
+    _account_id = cfg.get("account_id", "")
 
 
 def log(level: str, event: str, **kw: object) -> None:
@@ -133,7 +134,7 @@ def emit(event_type: str, metadata: dict[str, Any]) -> None:
         entry["metadata"] = encrypt_metadata(dict(entry["metadata"]), _e2e_key)
     global _prev_hash
     from methodproof.integrity import compute_event_hash
-    entry["_chain_hash"] = compute_event_hash(entry, _prev_hash)
+    entry["_chain_hash"] = compute_event_hash(entry, _prev_hash, _account_id)
     _prev_hash = entry["_chain_hash"]
     if _live_mode:
         from methodproof import live as live_mod

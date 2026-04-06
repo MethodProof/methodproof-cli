@@ -694,6 +694,49 @@ def cmd_journal(args: argparse.Namespace) -> None:
         print("Usage: methodproof journal [on|off|status]")
 
 
+def _decode_jwt_claims(token: str) -> dict:
+    """Extract claims from JWT payload without verification (auth already done server-side)."""
+    import base64
+    parts = token.split(".")
+    if len(parts) != 3:
+        return {}
+    payload = parts[1] + "=" * (-len(parts[1]) % 4)  # pad base64
+    return json.loads(base64.urlsafe_b64decode(payload))
+
+
+def _require_auth(cfg: dict) -> str:
+    """Ensure valid auth. Returns account_id. Exits on failure."""
+    token = cfg.get("token", "")
+    if not token:
+        print("Login required. Run `mp login` first.")
+        sys.exit(1)
+    claims = _decode_jwt_claims(token)
+    account_id = claims.get("user_id", "")
+    if not account_id:
+        print("Invalid token. Run `mp login` to re-authenticate.")
+        sys.exit(1)
+    # Check expiry — attempt refresh if expired
+    exp = claims.get("exp", 0)
+    if exp and time.time() > exp:
+        from methodproof.sync import _refresh_token
+        pair = _refresh_token(cfg["api_url"], cfg.get("refresh_token", ""))
+        if pair:
+            cfg["token"], cfg["refresh_token"] = pair
+            cfg["last_auth_at"] = time.time()
+            cfg["account_id"] = account_id
+            config.save(cfg)
+            return account_id
+        # Offline grace — allow if last auth was within 24h
+        if time.time() - cfg.get("last_auth_at", 0) < 86400:
+            return account_id
+        print("Session expired. Run `mp login` to re-authenticate.")
+        sys.exit(1)
+    cfg["last_auth_at"] = time.time()
+    cfg["account_id"] = account_id
+    config.save(cfg)
+    return account_id
+
+
 def _is_daemon_alive() -> bool:
     """Check if the recording daemon is still running."""
     if not PIDFILE.exists():
@@ -727,6 +770,8 @@ def cmd_start(args: argparse.Namespace) -> None:
         print("Run `methodproof init` first.")
         sys.exit(1)
 
+    account_id = _require_auth(cfg)
+
     # Check for new consent categories before recording
     capture = cfg.get("capture", {})
     new_cats = (set(config.STANDARD_CATEGORIES) | {"code_capture"}) - set(capture.keys())
@@ -742,7 +787,7 @@ def cmd_start(args: argparse.Namespace) -> None:
     repo_url = args.repo or repos.detect_repo(watch_dir)
     tags = args.tags.split(",") if args.tags else []
     visibility = "public" if args.public else "private"
-    store.create_session(sid, watch_dir, repo_url, json.dumps(tags), visibility)
+    store.create_session(sid, watch_dir, repo_url, json.dumps(tags), visibility, account_id)
     cfg["active_session"] = sid
     config.save(cfg)
     PIDFILE.write_text(str(os.getpid()))

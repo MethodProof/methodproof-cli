@@ -6,12 +6,15 @@ from pathlib import Path
 from typing import Any
 
 
-def compute_event_hash(event: dict[str, Any], prev_hash: str) -> str:
-    """SHA-256 of {event_id}:{type}:{timestamp}:{metadata_hash}:{prev_hash}."""
+def compute_event_hash(event: dict[str, Any], prev_hash: str, account_id: str = "") -> str:
+    """SHA-256 chain link. Includes account_id when present (new format), omits for legacy."""
     metadata_hash = hashlib.sha256(
         json.dumps(event.get("metadata", {}), sort_keys=True, default=str).encode()
     ).hexdigest()
-    payload = f"{event['id']}:{event['type']}:{event['timestamp']}:{metadata_hash}:{prev_hash}"
+    if account_id:
+        payload = f"{event['id']}:{account_id}:{event['type']}:{event['timestamp']}:{metadata_hash}:{prev_hash}"
+    else:
+        payload = f"{event['id']}:{event['type']}:{event['timestamp']}:{metadata_hash}:{prev_hash}"
     return hashlib.sha256(payload.encode()).hexdigest()
 
 

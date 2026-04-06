@@ -93,7 +93,8 @@ def _migrate() -> None:
     """Add columns/tables for existing databases."""
     db = _db()
     cols = {r[1] for r in db.execute("PRAGMA table_info(sessions)").fetchall()}
-    for col, default in [("repo_url", None), ("tags", "'[]'"), ("visibility", "'private'")]:
+    for col, default in [("repo_url", None), ("tags", "'[]'"), ("visibility", "'private'"),
+                          ("account_id", None)]:
         if col not in cols:
             ddl = f"ALTER TABLE sessions ADD COLUMN {col} TEXT"
             if default:
@@ -110,11 +111,12 @@ def _migrate() -> None:
 def create_session(
     session_id: str, watch_dir: str,
     repo_url: str | None = None, tags: str = "[]", visibility: str = "private",
+    account_id: str = "",
 ) -> None:
     _db().execute(
-        "INSERT INTO sessions (id, watch_dir, created_at, repo_url, tags, visibility) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (session_id, watch_dir, time.time(), repo_url, tags, visibility),
+        "INSERT INTO sessions (id, watch_dir, created_at, repo_url, tags, visibility, account_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (session_id, watch_dir, time.time(), repo_url, tags, visibility, account_id or None),
     )
     _db().commit()
 
