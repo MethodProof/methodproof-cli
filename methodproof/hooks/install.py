@@ -91,15 +91,27 @@ def install() -> str | None:
             hooks[event] = [{"matcher": "", "hooks": [entry]}]
             changed = True
         else:
-            # Check if our hook is already installed
-            existing_cmds = [
-                h.get("command", "")
-                for group in hooks[event]
-                for h in group.get("hooks", [])
-            ]
-            if script not in existing_cmds:
-                hooks[event].append({"matcher": "", "hooks": [entry]})
+            # Remove any stale methodproof hooks (different install path)
+            cleaned = []
+            has_current = False
+            for group in hooks[event]:
+                group_hooks = []
+                for h in group.get("hooks", []):
+                    cmd = h.get("command", "")
+                    if "methodproof" in cmd:
+                        if cmd == script:
+                            has_current = True
+                            group_hooks.append(h)
+                        else:
+                            changed = True  # dropping stale entry
+                    else:
+                        group_hooks.append(h)
+                if group_hooks:
+                    cleaned.append({**group, "hooks": group_hooks})
+            if not has_current:
+                cleaned.append({"matcher": "", "hooks": [entry]})
                 changed = True
+            hooks[event] = cleaned
 
     if changed:
         settings["hooks"] = hooks
