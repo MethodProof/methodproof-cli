@@ -83,9 +83,15 @@ def push(session_id: str, token: str, api_url: str) -> str:
         print(f"Already synced: {session_id[:8]}")
         return session.get("remote_id", "")
 
-    # Create remote session
+    # Create remote session (include binding + device_id if available)
     print("Creating remote session...", end=" ", flush=True)
-    result = _request("POST", "/personal/sessions", api_url, token)
+    create_body: dict[str, Any] = {}
+    if session.get("session_binding"):
+        create_body["session_binding"] = session["session_binding"]
+    if session.get("device_id"):
+        create_body["device_id"] = session["device_id"]
+    result = _request("POST", "/personal/sessions", api_url, token,
+                      create_body or None)
     remote_id = result["session_id"]
     print(f"done ({remote_id[:8]})")
 

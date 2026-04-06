@@ -853,7 +853,20 @@ def cmd_start(args: argparse.Namespace) -> None:
     repo_url = args.repo or repos.detect_repo(watch_dir)
     tags = args.tags.split(",") if args.tags else []
     visibility = "public" if args.public else "private"
-    store.create_session(sid, watch_dir, repo_url, json.dumps(tags), visibility, account_id)
+    from methodproof.binding import compute_binding, compute_device_id
+    device_id = compute_device_id()
+    # Compute session binding if master key is available
+    binding = ""
+    if cfg.get("master_key_fingerprint") and account_id:
+        from methodproof.keychain import load_secret
+        from methodproof.kdf import derive_master, derive_bind_key
+        entropy = load_secret(account_id)
+        if entropy:
+            master = derive_master(entropy)
+            bind_key = derive_bind_key(master, account_id)
+            binding = compute_binding(bind_key, sid, account_id, device_id, time.time())
+    store.create_session(sid, watch_dir, repo_url, json.dumps(tags), visibility,
+                         account_id, binding, device_id)
     cfg["active_session"] = sid
     config.save(cfg)
     PIDFILE.write_text(str(os.getpid()))
