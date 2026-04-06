@@ -338,6 +338,14 @@ def cmd_init(args: argparse.Namespace) -> None:
     capture = cfg.get("capture", {})
     store.init_db()
 
+    # Offer auto-update (recommended)
+    if not cfg.get("auto_update_offered"):
+        answer = input("Enable auto-update (recommended)? [Y/n]: ").strip().lower()
+        cfg["auto_update_offered"] = True
+        cfg["auto_update"] = answer != "n"
+        print(f"Auto-update: {'ON — updates install before each session' if cfg['auto_update'] else 'OFF — toggle with: mp update --auto'}")
+        config.save(cfg)
+
     # Offer mp alias
     if not cfg.get("alias_offered"):
         answer = input("Install `mp` as a shorthand alias? [Y/n]: ").strip().lower()
@@ -456,6 +464,8 @@ def _print_commands() -> None:
     print(f"    {_M}mp reset{R}               Clear login and consent (keeps sessions)")
     print(f"    {_M}mp delete{R} {_D}<id>{R}        Delete a session and all its data")
     print(f"    {_M}mp update{R}              Update to the latest version")
+    print(f"    {_M}mp update --auto{R}      Toggle auto-update on  {_D}(recommended){R}")
+    print(f"    {_M}mp update --no-auto{R}   Toggle auto-update off")
     print(f"    {_M}mp uninstall{R}           Remove all hooks, data, and config")
     print()
     print(f"  {_D}To view this at any time run: mp help{R}\n")
@@ -488,6 +498,8 @@ def _print_commands_plain() -> None:
     print("    mp reset              Clear login and consent (keeps sessions)")
     print("    mp delete <id>        Delete a session and all its data")
     print("    mp update             Update to the latest version")
+    print("    mp update --auto      Toggle auto-update on (recommended)")
+    print("    mp update --no-auto   Toggle auto-update off")
     print("    mp uninstall          Remove all hooks, data, and config")
     print()
     print("  To view this at any time run: mp help\n")
@@ -582,12 +594,12 @@ def cmd_reset(args: argparse.Namespace) -> None:
     for key in ("token", "refresh_token", "email", "e2e_key"):
         cfg[key] = config._DEFAULTS[key]
     for key in ("capture", "research_consent", "publish_redact", "consent_acknowledged",
-                "journal_mode", "journal_credits"):
+                "journal_mode", "journal_credits", "auto_update", "auto_update_offered"):
         cfg[key] = config._DEFAULTS.get(key)
     config.save(cfg)
     cleared = ["login token", "refresh token", "email", "e2e key",
                "capture consent", "research consent", "redaction defaults",
-               "journal mode"]
+               "journal mode", "auto-update"]
     print("  Cleared:")
     for c in cleared:
         print(f"    {c}")
@@ -670,6 +682,8 @@ def _is_daemon_alive() -> bool:
 
 def cmd_start(args: argparse.Namespace) -> None:
     cfg = config.load()
+    if cfg.get("auto_update"):
+        _auto_update()
     if cfg.get("active_session"):
         if _is_daemon_alive():
             print(f"Session active: {cfg['active_session'][:8]}")
@@ -1104,6 +1118,17 @@ def cmd_review(args: argparse.Namespace) -> None:
 
 
 def cmd_update(args: argparse.Namespace) -> None:
+    # Handle --auto / --no-auto toggle
+    if getattr(args, "auto", None) is not None:
+        cfg = config.load()
+        cfg["auto_update"] = args.auto
+        config.save(cfg)
+        state = "ON" if args.auto else "OFF"
+        print(f"Auto-update: {state}")
+        if args.auto:
+            print("  Updates will install automatically before each `mp start`.")
+        return
+
     latest = _check_pypi_version()
     current = _get_current_version()
     if not latest:
@@ -1195,6 +1220,25 @@ def _update_check() -> None:
 
     t = threading.Thread(target=_check, daemon=True)
     t.start()
+
+
+def _auto_update() -> None:
+    """Check PyPI and install update before starting a session."""
+    latest = _check_pypi_version()
+    current = _get_current_version()
+    if not latest or latest == current:
+        return
+    print(f"  Updating v{current} -> v{latest}...", end=" ", flush=True)
+    import subprocess as sp
+    result = sp.run(
+        [sys.executable, "-m", "pip", "install", "--upgrade", "methodproof"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        print("done.")
+        _check_consent_drift()
+    else:
+        print("failed (run `mp update` manually).")
 
 
 def cmd_mcp_serve(args: argparse.Namespace) -> None:
@@ -1371,7 +1415,12 @@ def main() -> None:
     rv = sub.add_parser("review", help="Review session data before pushing")
     rv.add_argument("session_id", nargs="?")
     sub.add_parser("consent", help="Change capture, research, and redaction settings")
-    sub.add_parser("update", help="Update to the latest version from PyPI")
+    up = sub.add_parser("update", help="Update to the latest version from PyPI")
+    up_auto = up.add_mutually_exclusive_group()
+    up_auto.add_argument("--auto", dest="auto", action="store_true", default=None,
+                         help="Enable auto-update before each mp start (recommended)")
+    up_auto.add_argument("--no-auto", dest="auto", action="store_false",
+                         help="Disable auto-update")
     rs = sub.add_parser("reset", help="Clear login and consent settings (keeps sessions and hooks)")
     rs.add_argument("--force", "-f", action="store_true", help="Skip confirmation")
     un = sub.add_parser("uninstall", help="Remove all hooks, data, and config")
