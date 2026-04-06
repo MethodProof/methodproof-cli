@@ -1146,10 +1146,16 @@ def cmd_login(args: argparse.Namespace) -> None:
     result = _request("POST", "/auth/cli/start", api, "")
     code = result["code"]
     auth_url = result["auth_url"]
+    user_code = result.get("user_code", "")
+    verification_url = result.get("verification_url", "")
 
     print(f"\nOpening browser to sign in...\n")
     print(f"  {auth_url}\n")
-    print("If the browser doesn't open, copy the URL above.\n")
+    if user_code and verification_url:
+        print(f"Can't open a browser? Visit {verification_url} and enter:\n")
+        print(f"  {user_code}\n")
+    else:
+        print("If the browser doesn't open, copy the URL above.\n")
     webbrowser.open(auth_url)
 
     # Poll until approved or expired
