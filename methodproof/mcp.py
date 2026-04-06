@@ -30,8 +30,8 @@ def _emit(event_type: str, metadata: dict[str, Any]) -> None:
             headers={"Content-Type": "application/json"}, method="POST",
         )
         urllib.request.urlopen(req, timeout=2)
-    except Exception:
-        pass
+    except Exception as exc:
+        sys.stderr.write(f"mcp.bridge_post_failed type={event_type} error={exc}\n")
 
 
 def serve() -> None:

@@ -95,7 +95,8 @@ def send(event: dict[str, Any]) -> None:
     try:
         _send_queue.put_nowait(json.dumps(event, default=str))
     except queue.Full:
-        pass
+        from methodproof.agents.base import log
+        log("warning", "live.queue_full", dropped_type=event.get("type", "?"))
 
 
 def stop() -> None:
@@ -106,8 +107,9 @@ def stop() -> None:
     if _ws:
         try:
             _ws.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            from methodproof.agents.base import log
+            log("warning", "live.close_failed", error=str(exc))
         _ws = None
 
 

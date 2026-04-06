@@ -32,8 +32,8 @@ def load_secret(account_id: str) -> bytes | None:
         val = keyring.get_password(_SERVICE, account_id)
         if val:
             return bytes.fromhex(val)
-    except Exception:
-        pass
+    except Exception as exc:
+        sys.stderr.write(f"keychain.load_failed account={account_id} error={exc}\n")
     return _load_file()
 
 
@@ -42,8 +42,8 @@ def delete_secret(account_id: str) -> None:
     try:
         import keyring
         keyring.delete_password(_SERVICE, account_id)
-    except Exception:
-        pass
+    except Exception as exc:
+        sys.stderr.write(f"keychain.delete_failed account={account_id} error={exc}\n")
     path = _fallback_path()
     if path.exists():
         path.unlink()

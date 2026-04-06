@@ -39,7 +39,8 @@ def _get_now_playing_macos() -> dict[str, str] | None:
         if len(parts) != 3 or not parts[0]:
             return None
         return {"track": parts[0], "artist": parts[1], "player": parts[2]}
-    except Exception:
+    except Exception as exc:
+        base.log("debug", "music.macos_poll_failed", error=str(exc))
         return None
 
 
@@ -58,7 +59,8 @@ def _get_now_playing_linux() -> dict[str, str] | None:
         return {"track": parts[1], "artist": parts[0], "player": player_map.get(parts[2].lower(), "unknown")}
     except FileNotFoundError:
         return None
-    except Exception:
+    except Exception as exc:
+        base.log("debug", "music.linux_poll_failed", error=str(exc))
         return None
 
 

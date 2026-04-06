@@ -42,7 +42,9 @@ def _refresh_token(api_url: str, refresh: str) -> tuple[str, str] | None:
     try:
         result = _raw_request("POST", f"{api_url}/auth/refresh", "", {"refresh_token": refresh})
         return result["access_token"], result["refresh_token"]
-    except Exception:
+    except Exception as exc:
+        from methodproof.agents.base import log
+        log("warning", "sync.refresh_token_failed", error=str(exc))
         return None
 
 
@@ -69,8 +71,8 @@ def _request(
         if exc.fp:
             try:
                 detail = json.loads(exc.read()).get("detail", "")
-            except Exception:
-                pass
+            except Exception as parse_err:
+                detail = f"(response unreadable: {parse_err})"
         raise SystemExit(f"API error {exc.code}: {detail}") from None
 
 

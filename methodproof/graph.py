@@ -87,8 +87,9 @@ def build(session_id: str) -> dict[str, int]:
                  time.time(), 0, json.dumps(outcomes)),
             )
             stats["outcomes"] = 1
-    except Exception:
-        pass
+    except Exception as exc:
+        from methodproof.agents.base import log
+        log("warning", "graph.outcomes_failed", session_id=session_id, error=str(exc))
 
     db.commit()
     return stats

@@ -907,8 +907,8 @@ def cmd_start(args: argparse.Namespace) -> None:
             from methodproof.sync import _request
             anchor = _request("POST", f"/sessions/{sid}/anchor", cfg["api_url"], cfg["token"])
             store.update_anchor(sid, anchor["anchor_ts"], anchor["signature"])
-        except Exception:
-            pass  # offline — no anchor, lower trust score
+        except Exception as exc:
+            print(f"Anchor: skipped ({exc})")
 
     from methodproof.agents import base
     live_ok = False
@@ -950,47 +950,10 @@ def cmd_start(args: argparse.Namespace) -> None:
             print("Journal mode ON for this session (full content capture).")
         config.save(cfg)
 
-    base.init(sid, live=bool(live_url))
-
-    if capture.get("environment_analysis", True):
-        from methodproof.analysis import scan_environment
-        try:
-            env_profile = scan_environment(watch_dir)
-            base.emit("environment_profile", env_profile)
-        except Exception:
-            base.log("warning", "environment_scan.failed")
-
-    stop_event = threading.Event()
-
-    threads: list[threading.Thread] = []
-
-    # File watcher — if any file/git category is enabled
-    files_enabled = (
-        capture.get("file_changes", True)
-        or capture.get("git_diffs", True)
-        or capture.get("git_commits", True)
-    )
-    if files_enabled:
-        from methodproof.agents import watcher
-        threads.append(threading.Thread(target=watcher.start, args=(watch_dir, stop_event), daemon=True))
-
-    # Terminal monitor — if terminal or test categories enabled
-    if capture.get("terminal_commands", True) or capture.get("test_results", True):
-        from methodproof.agents import terminal
-        threads.append(threading.Thread(target=terminal.start, args=(stop_event,), daemon=True))
-
-    # Bridge — if browser category enabled
-    if capture.get("browser", True):
-        from methodproof import bridge
-        threads.append(threading.Thread(target=bridge.start, args=(
-            sid, stop_event, 9877,
-            cfg.get("token", ""), cfg.get("api_url", ""), cfg.get("e2e_key", ""),
-        ), daemon=True))
-
-    # Music — if music category enabled
-    if capture.get("music", True):
-        from methodproof.agents import music
-        threads.append(threading.Thread(target=music.start, args=(stop_event,), daemon=True))
+    # Save live_url for daemon subprocess to pick up
+    if live_url:
+        cfg["_live_url"] = live_url
+        config.save(cfg)
 
     active = [k for k, v in capture.items() if v]
     print(f"\n{_banner()}")
@@ -1004,69 +967,92 @@ def cmd_start(args: argparse.Namespace) -> None:
     if live_url:
         print(f"Live:      {live_url}")
 
+    # Daemonize: spawn a subprocess (safe on macOS — avoids CoreFoundation segfault from os.fork)
+    if sys.platform != "win32":
+        import subprocess as _sp
+        daemon_log = config.DIR / "daemon.log"
+        log_fh = open(daemon_log, "a")
+        proc = _sp.Popen(
+            [sys.executable, "-m", "methodproof._daemon", sid, watch_dir],
+            start_new_session=True,
+            stdout=log_fh, stderr=log_fh, stdin=_sp.DEVNULL,
+        )
+        PIDFILE.write_text(str(proc.pid))
+        # Verify daemon is alive after brief startup
+        time.sleep(1)
+        if proc.poll() is not None:
+            print(f"ERROR: Daemon exited immediately (code {proc.returncode}). Check {daemon_log}")
+            PIDFILE.unlink(missing_ok=True)
+            sys.exit(1)
+        # Check extension auto-discovery (extension polls every ~6s)
+        if capture.get("browser", True):
+            import urllib.request as _ur
+            time.sleep(7)
+            try:
+                with _ur.urlopen("http://127.0.0.1:9877/extension-status", timeout=2) as resp:
+                    ext_data = json.loads(resp.read())
+                if ext_data.get("paired"):
+                    print("Extension: connected")
+                else:
+                    print("Extension: not detected — run `mp extension pair` or install from store")
+            except Exception as exc:
+                print(f"Extension: not detected ({exc})")
+        print("Run `mp stop` to finish.")
+        return
+
+    # Windows: foreground mode (no subprocess daemonization)
+    from methodproof.agents import base as _base
+    _base.init(sid, live=bool(live_url))
+    if capture.get("environment_analysis", True):
+        try:
+            from methodproof.analysis import scan_environment
+            env_profile = scan_environment(watch_dir)
+            _base.emit("environment_profile", env_profile)
+        except Exception as exc:
+            _base.log("warning", "environment_scan.failed", error=str(exc))
+    stop_event = threading.Event()
+    threads: list[threading.Thread] = []
+    files_enabled = (
+        capture.get("file_changes", True)
+        or capture.get("git_diffs", True)
+        or capture.get("git_commits", True)
+    )
+    if files_enabled:
+        from methodproof.agents import watcher
+        threads.append(threading.Thread(target=watcher.start, args=(watch_dir, stop_event), daemon=True))
+    if capture.get("terminal_commands", True) or capture.get("test_results", True):
+        from methodproof.agents import terminal
+        threads.append(threading.Thread(target=terminal.start, args=(stop_event,), daemon=True))
+    if capture.get("browser", True):
+        from methodproof import bridge
+        threads.append(threading.Thread(target=bridge.start, args=(
+            sid, stop_event, 9877,
+            cfg.get("token", ""), cfg.get("api_url", ""), cfg.get("e2e_key", ""),
+        ), daemon=True))
+    if capture.get("music", True):
+        from methodproof.agents import music
+        threads.append(threading.Thread(target=music.start, args=(stop_event,), daemon=True))
+
     def _shutdown(sig: int, frame: object) -> None:
         stop_event.set()
         try:
             if live_url:
                 from methodproof import live as live_mod
                 live_mod.stop()
-            base.flush()
+            _base.flush()
             store.complete_session(sid)
             graph.build(sid)
-        except Exception:
-            pass
+        except Exception as exc:
+            _base.log("error", "shutdown.cleanup_failed", error=str(exc))
         try:
             cfg_now = config.load()
             cfg_now["active_session"] = None
             config.save(cfg_now)
-        except Exception:
-            pass
+        except Exception as exc:
+            _base.log("error", "shutdown.config_cleanup_failed", error=str(exc))
         PIDFILE.unlink(missing_ok=True)
         sys.exit(0)
 
-    # Daemonize: fork into background so the terminal is free
-    if sys.platform != "win32":
-        child = os.fork()
-        if child > 0:
-            # Parent: write child PID and exit
-            PIDFILE.write_text(str(child))
-            # Brief pause for extension auto-discovery (extension polls every ~6s in dev)
-            if capture.get("browser", True):
-                import urllib.request as _ur
-                time.sleep(8)
-                try:
-                    with _ur.urlopen("http://127.0.0.1:9877/extension-status", timeout=2) as resp:
-                        ext_data = json.loads(resp.read())
-                    if ext_data.get("paired"):
-                        print(f"Extension: connected")
-                    else:
-                        print(f"Extension: not detected — run `mp extension pair` or install from store")
-                except Exception:
-                    print(f"Extension: not detected")
-            print("Run `mp stop` to finish.")
-            return
-        # Child: detach and run in background
-        os.setsid()
-        # Redirect stdio to /dev/null so writes don't fail after terminal closes
-        devnull = os.open(os.devnull, os.O_RDWR)
-        os.dup2(devnull, 0)
-        os.dup2(devnull, 1)
-        os.dup2(devnull, 2)
-        os.close(devnull)
-        store.reset_connection()
-        for t in threads:
-            t.start()
-        signal.signal(signal.SIGINT, _shutdown)
-        signal.signal(signal.SIGTERM, _shutdown)
-        try:
-            while not stop_event.is_set():
-                time.sleep(5)
-                base.flush()
-        except Exception:
-            _shutdown(0, None)
-        return
-
-    # Windows: foreground mode (no fork)
     for t in threads:
         t.start()
     signal.signal(signal.SIGINT, _shutdown)
@@ -1077,7 +1063,7 @@ def cmd_start(args: argparse.Namespace) -> None:
             stopfile.unlink(missing_ok=True)
             _shutdown(0, None)
         time.sleep(5)
-        base.flush()
+        _base.flush()
 
 
 def cmd_stop(args: argparse.Namespace) -> None:

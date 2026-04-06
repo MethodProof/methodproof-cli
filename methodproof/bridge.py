@@ -73,7 +73,9 @@ def generate_pair_token(session_id: str, api_token: str, api_base: str, e2e_key:
 
 class _Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:
-        pass
+        # Log errors (4xx/5xx) to structured log; suppress normal request chatter
+        if args and str(args[0]).startswith(("4", "5")):
+            base.log("warning", "bridge.http_error", status=args[0], path=self.path)
 
     def do_GET(self) -> None:
         if self.path == "/session":

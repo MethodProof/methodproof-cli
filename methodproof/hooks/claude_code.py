@@ -29,20 +29,25 @@ _TYPE_MAP = {
     "PostToolUse": "tool_result",
     "SubagentStart": "agent_launch",
     "SubagentStop": "agent_complete",
-    "TaskCreated": "task_created",
-    "TaskCompleted": "task_completed",
+    "TaskCreated": "task_start",
+    "TaskCompleted": "task_end",
     "SessionStart": "claude_session_start",
 }
 
+_TOOL = "claude_code"
+
 _META_EXTRACTORS = {
-    "UserPromptSubmit": lambda d: _build_prompt_meta(d.get("prompt") or ""),
-    "PreToolUse": lambda d: {"tool": d.get("tool_name", "unknown"), "tool_use_id": d.get("tool_use_id", "")},
-    "PostToolUse": lambda d: {"tool": d.get("tool_name", "unknown"), "tool_use_id": d.get("tool_use_id", "")},
-    "SubagentStart": lambda d: {"agent_type": d.get("agent_type", "unknown"), "agent_id": d.get("agent_id", "")},
-    "SubagentStop": lambda d: {"agent_type": d.get("agent_type", "unknown"), "agent_id": d.get("agent_id", "")},
-    "TaskCreated": lambda d: {"task_id": d.get("task_id", ""), "subject": d.get("subject", "")},
-    "TaskCompleted": lambda d: {"task_id": d.get("task_id", "")},
-    "SessionStart": lambda d: {"claude_session_id": d.get("session_id", ""), "cwd": d.get("cwd", "")},
+    "UserPromptSubmit": lambda d: {
+        "tool": _TOOL, "prompt_preview": _build_prompt_meta(d.get("prompt") or "").get("prompt_summary", ""),
+        "prompt_length": len(d.get("prompt") or ""),
+    },
+    "PreToolUse": lambda d: {"tool": _TOOL, "tool_name": d.get("tool_name", "unknown")},
+    "PostToolUse": lambda d: {"tool": _TOOL, "tool_name": d.get("tool_name", "unknown"), "success": True},
+    "SubagentStart": lambda d: {"tool": _TOOL, "agent_type": d.get("agent_type", "unknown"), "agent_id": d.get("agent_id", "")},
+    "SubagentStop": lambda d: {"tool": _TOOL, "agent_type": d.get("agent_type", "unknown"), "agent_id": d.get("agent_id", "")},
+    "TaskCreated": lambda d: {"tool": _TOOL, "task_id": d.get("task_id", ""), "subject": d.get("subject", "")},
+    "TaskCompleted": lambda d: {"tool": _TOOL, "task_id": d.get("task_id", "")},
+    "SessionStart": lambda d: {"tool": _TOOL, "session_id": d.get("session_id", ""), "cwd": d.get("cwd", "")},
 }
 
 
@@ -53,9 +58,11 @@ def main() -> None:
         return
 
     event = data.get("hook_event_name", "unknown")
-    etype = _TYPE_MAP.get(event, "claude_code_event")
+    etype = _TYPE_MAP.get(event)
+    if not etype:
+        return  # Unmapped hook event — drop rather than send invalid type
     extractor = _META_EXTRACTORS.get(event)
-    meta = extractor(data) if extractor else {"event": event}
+    meta = extractor(data) if extractor else {"tool": _TOOL}
     ts = time.time()
 
     payload = json.dumps({"events": [{"type": etype, "timestamp": ts, "metadata": meta}]}).encode()
@@ -65,8 +72,14 @@ def main() -> None:
     )
     try:
         urllib.request.urlopen(req, timeout=1)
-    except Exception:
-        pass
+    except Exception as exc:
+        import pathlib
+        log = pathlib.Path.home() / ".methodproof" / "hook_errors.log"
+        try:
+            with open(log, "a") as f:
+                f.write(f"{time.time():.0f} hook.post_failed type={etype} error={exc}\n")
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":

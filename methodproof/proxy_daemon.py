@@ -35,13 +35,13 @@ _STRIP_HEADERS = {"authorization", "x-api-key", "api-key", "x-goog-api-key"}
 
 
 def _post_event(event_type: str, metadata: dict) -> None:
-    """Post event to bridge. Fail silently."""
+    """Post event to bridge. Logs on failure."""
     body = json.dumps({"events": [{"type": event_type, "timestamp": time.time(), "metadata": metadata}]}).encode()
     req = urllib.request.Request(BRIDGE_URL, data=body, headers={"Content-Type": "application/json"})
     try:
         urllib.request.urlopen(req, timeout=1)
-    except Exception:
-        pass
+    except Exception as exc:
+        sys.stderr.write(f"proxy.bridge_post_failed type={event_type} error={exc}\n")
 
 
 def _is_ai_domain(domain: str) -> bool:
@@ -68,8 +68,8 @@ def _decode_via_binary(provider: str, direction: str, body: dict, latency_ms: fl
         )
         if result.returncode == 0 and result.stdout.strip():
             return json.loads(result.stdout)
-    except Exception:
-        pass
+    except Exception as exc:
+        sys.stderr.write(f"proxy.decoder_failed provider={provider} dir={direction} error={exc}\n")
     return None
 
 
@@ -83,7 +83,8 @@ def _match_provider(domain: str, path: str) -> str | None:
         )
         name = result.stdout.strip()
         return name if name and name != "null" else None
-    except Exception:
+    except Exception as exc:
+        sys.stderr.write(f"proxy.match_failed domain={domain} path={path} error={exc}\n")
         return None
 
 
