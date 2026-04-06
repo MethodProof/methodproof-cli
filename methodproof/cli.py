@@ -60,6 +60,69 @@ def _banner() -> str:
     return f"MethodProof — {_rainbow('Full Spectrum')}"
 
 
+def _app_url(api_url: str) -> str:
+    """Derive dashboard URL from API URL."""
+    if "localhost" in api_url or "127.0.0.1" in api_url:
+        return "http://localhost:5173"
+    return api_url.replace("api.", "app.", 1)
+
+
+def _print_intro() -> None:
+    """Show the 3-layer architecture intro with rainbow borders."""
+    if not sys.stdout.isatty():
+        _print_intro_plain()
+        return
+
+    W = "\033[1;97m"
+    G = "\033[92m"
+    C = "\033[96m"
+    Y = "\033[93m"
+    D = "\033[90m"
+    R = _RESET
+
+    bar = _rainbow("━" * 51)
+
+    print(f"\n  {bar}\n")
+    print(f"       {W}M E T H O D P R O O F{R}")
+    print(f"    {D}See how you code. Prove how you build.{R}")
+    print(f"\n  {bar}\n")
+    print(f"   ┌────────────────────────────────────────────────┐")
+    print(f"   │  {Y}SHARE{R}     push · publish · live stream        │")
+    print(f"   ├────────────────────────────────────────────────┤")
+    print(f"   │  {C}GRAPH{R}     knowledge graph · moments · edges   │")
+    print(f"   ├────────────────────────────────────────────────┤")
+    print(f"   │  {G}CAPTURE{R}   hooks · proxy · plugin              │")
+    print(f"   └────────────────────────────────────────────────┘")
+    print()
+    print(f"   {D}1.{R} {G}mp start{R}       begin recording")
+    print(f"   {D}2.{R} code normally  {D}MethodProof watches silently{R}")
+    print(f"   {D}3.{R} {G}mp stop{R}        build your process graph")
+    print(f"   {D}4.{R} {G}mp push{R}        upload to your profile")
+    print()
+    print(f"   {D}All data stays local until you push.{R}\n")
+
+
+def _print_intro_plain() -> None:
+    print("\n  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+    print("       M E T H O D P R O O F")
+    print("    See how you code. Prove how you build.")
+    print("\n  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+    print("   ┌────────────────────────────────────────────────┐")
+    print("   │  SHARE     push · publish · live stream        │")
+    print("   ├────────────────────────────────────────────────┤")
+    print("   │  GRAPH     knowledge graph · moments · edges   │")
+    print("   ├────────────────────────────────────────────────┤")
+    print("   │  CAPTURE   hooks · proxy · plugin              │")
+    print("   └────────────────────────────────────────────────┘")
+    print()
+    print("   1. mp start       begin recording")
+    print("   2. code normally  MethodProof watches silently")
+    print("   3. mp stop        build your process graph")
+    print("   4. mp push        upload to your profile")
+    print()
+    print("   All data stays local until you push.\n")
+
+
 _ALIAS_MARKER = "# methodproof-alias"
 
 
@@ -345,9 +408,8 @@ def cmd_init(args: argparse.Namespace) -> None:
     else:
         print("Signing key: exists")
 
-    print(f"\n{_banner()}")
-    print("Restart your shell, then run: methodproof start\n")
-    _print_commands()
+    _print_intro()
+    print("  Restart your shell, then run: mp start\n")
 
 
 def _print_commands() -> None:
@@ -907,8 +969,11 @@ def cmd_push(args: argparse.Namespace) -> None:
         print("No sessions to push.")
         sys.exit(1)
     from methodproof.sync import push
-    push(sid, cfg["token"], cfg["api_url"])
-    print(f"Pushed {sid[:8]} (private). Use `mp publish` to make public.")
+    remote_id = push(sid, cfg["token"], cfg["api_url"])
+    app = _app_url(cfg["api_url"])
+    print(f"Pushed {sid[:8]} (private).")
+    print(f"  View: {app}/personal/sessions/{remote_id}")
+    print(f"  Publish: mp publish {sid[:8]}")
 
 
 def cmd_tag(args: argparse.Namespace) -> None:
@@ -938,11 +1003,15 @@ def cmd_publish(args: argparse.Namespace) -> None:
     session["visibility"] = "public"
     if not session["synced"]:
         from methodproof.sync import push
-        push(session["id"], cfg["token"], cfg["api_url"])
+        remote_id = push(session["id"], cfg["token"], cfg["api_url"])
     else:
         from methodproof.sync import sync_metadata
         sync_metadata(session, cfg["token"], cfg["api_url"])
+        remote_id = session.get("remote_id", "")
+    app = _app_url(cfg["api_url"])
     print(f"Published {session['id'][:8]} (public).")
+    if remote_id:
+        print(f"  View: {app}/sessions/{remote_id}/cover")
 
 
 def _resolve_session(session_id: str) -> dict:
@@ -1290,6 +1359,7 @@ def main() -> None:
     jr_sub.add_parser("on", help="Enable journal mode (persists full content)")
     jr_sub.add_parser("off", help="Disable journal mode (structural only)")
     jr_sub.add_parser("status", help="Show journal mode status")
+    sub.add_parser("intro", help="Show the MethodProof intro")
     sub.add_parser("help", help="Show command reference")
     sub.add_parser("mcp-serve", help="Run MCP server (used by Claude Code)")
     px = sub.add_parser("proxy", help="Local AI API proxy (deep capture)")
@@ -1308,12 +1378,14 @@ def main() -> None:
         "update": cmd_update, "uninstall": cmd_uninstall,
         "extension": cmd_extension,
         "journal": cmd_journal,
+        "intro": lambda _: _print_intro(),
         "help": lambda _: _print_commands(),
         "mcp-serve": cmd_mcp_serve,
         "proxy": lambda a: __import__("methodproof.proxy", fromlist=["cmd_proxy"]).cmd_proxy(a),
     }
     fn = cmds.get(args.cmd)
     if not fn:
+        _print_intro()
         _print_commands()
         sys.exit(1)
 

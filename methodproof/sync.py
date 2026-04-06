@@ -74,14 +74,14 @@ def _request(
         raise SystemExit(f"API error {exc.code}: {detail}") from None
 
 
-def push(session_id: str, token: str, api_url: str) -> None:
+def push(session_id: str, token: str, api_url: str) -> str:
     """Upload a local session to the platform."""
     session = store.get_session(session_id)
     if not session:
         raise SystemExit(f"Session not found: {session_id}")
     if session["synced"]:
         print(f"Already synced: {session_id[:8]}")
-        return
+        return session.get("remote_id", "")
 
     # Create remote session
     print("Creating remote session...", end=" ", flush=True)
@@ -147,6 +147,7 @@ def push(session_id: str, token: str, api_url: str) -> None:
     sync_metadata(session, token, api_url)
 
     print(f"Pushed: {session_id[:8]} -> {api_url}")
+    return remote_id
 
 
 def _iso(ts: float) -> str:
