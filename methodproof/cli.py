@@ -26,6 +26,8 @@ import time
 import uuid
 from datetime import datetime, UTC
 
+from pathlib import Path
+
 from methodproof import config, store, graph, hook, repos
 
 PIDFILE = config.DIR / "methodproof.pid"
