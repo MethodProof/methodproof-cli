@@ -871,6 +871,15 @@ def cmd_start(args: argparse.Namespace) -> None:
     config.save(cfg)
     PIDFILE.write_text(str(os.getpid()))
 
+    # Temporal anchor — server-signed timestamp (best-effort, skip if offline)
+    if cfg.get("token"):
+        try:
+            from methodproof.sync import _request
+            anchor = _request("POST", f"/sessions/{sid}/anchor", cfg["api_url"], cfg["token"])
+            store.update_anchor(sid, anchor["anchor_ts"], anchor["signature"])
+        except Exception:
+            pass  # offline — no anchor, lower trust score
+
     from methodproof.agents import base
     live_ok = False
     capture = cfg.get("capture", {})

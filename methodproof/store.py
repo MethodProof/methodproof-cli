@@ -95,7 +95,8 @@ def _migrate() -> None:
     cols = {r[1] for r in db.execute("PRAGMA table_info(sessions)").fetchall()}
     for col, default in [("repo_url", None), ("tags", "'[]'"), ("visibility", "'private'"),
                           ("account_id", None), ("session_binding", None),
-                          ("device_id", None)]:
+                          ("device_id", None), ("anchor_ts", None),
+                          ("anchor_sig", None)]:
         if col not in cols:
             ddl = f"ALTER TABLE sessions ADD COLUMN {col} TEXT"
             if default:
@@ -233,6 +234,14 @@ def update_tags(session_id: str, tags: list[str]) -> None:
     _db().execute(
         "UPDATE sessions SET tags = ? WHERE id = ?",
         (json.dumps(tags), session_id),
+    )
+    _db().commit()
+
+
+def update_anchor(session_id: str, anchor_ts: float, anchor_sig: str) -> None:
+    _db().execute(
+        "UPDATE sessions SET anchor_ts = ?, anchor_sig = ? WHERE id = ?",
+        (anchor_ts, anchor_sig, session_id),
     )
     _db().commit()
 
