@@ -453,6 +453,7 @@ def _print_commands() -> None:
     print(f"  {_W}ACCOUNT{R}")
     print(f"    {_M}mp login{R}              Connect to platform (opens browser)")
     print(f"    {_M}mp consent{R}            Change capture, research, and redaction settings")
+    print(f"    {_M}mp reset{R}               Clear login and consent (keeps sessions)")
     print(f"    {_M}mp delete{R} {_D}<id>{R}        Delete a session and all its data")
     print(f"    {_M}mp update{R}              Update to the latest version")
     print(f"    {_M}mp uninstall{R}           Remove all hooks, data, and config")
@@ -484,6 +485,7 @@ def _print_commands_plain() -> None:
     print("  ACCOUNT")
     print("    mp login              Connect to platform (opens browser)")
     print("    mp consent            Change capture, research, and redaction settings")
+    print("    mp reset              Clear login and consent (keeps sessions)")
     print("    mp delete <id>        Delete a session and all its data")
     print("    mp update             Update to the latest version")
     print("    mp uninstall          Remove all hooks, data, and config")
@@ -567,6 +569,29 @@ def cmd_uninstall(args: argparse.Namespace) -> None:
             print(f"    {r}")
     print("\n  To remove the CLI itself: pip uninstall methodproof")
     print("  Restart your shell to clear hooks.\n")
+
+
+def cmd_reset(args: argparse.Namespace) -> None:
+    """Wipe login credentials and consent config. Sessions and hooks kept."""
+    cfg = config.load()
+    if not args.force:
+        answer = input("  Clear login and consent settings? Sessions and hooks are kept. [y/N]: ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("  Cancelled.")
+            return
+    for key in ("token", "refresh_token", "email", "e2e_key"):
+        cfg[key] = config._DEFAULTS[key]
+    for key in ("capture", "research_consent", "publish_redact", "consent_acknowledged",
+                "journal_mode", "journal_credits"):
+        cfg[key] = config._DEFAULTS.get(key)
+    config.save(cfg)
+    cleared = ["login token", "refresh token", "email", "e2e key",
+               "capture consent", "research consent", "redaction defaults",
+               "journal mode"]
+    print("  Cleared:")
+    for c in cleared:
+        print(f"    {c}")
+    print("\n  Run `mp init` to reconfigure, or `mp login` to reconnect.\n")
 
 
 def cmd_consent(args: argparse.Namespace) -> None:
@@ -1347,6 +1372,8 @@ def main() -> None:
     rv.add_argument("session_id", nargs="?")
     sub.add_parser("consent", help="Change capture, research, and redaction settings")
     sub.add_parser("update", help="Update to the latest version from PyPI")
+    rs = sub.add_parser("reset", help="Clear login and consent settings (keeps sessions and hooks)")
+    rs.add_argument("--force", "-f", action="store_true", help="Skip confirmation")
     un = sub.add_parser("uninstall", help="Remove all hooks, data, and config")
     un.add_argument("--force", "-f", action="store_true", help="Skip confirmation")
     ext = sub.add_parser("extension", help="Browser extension pairing and status")
@@ -1375,7 +1402,7 @@ def main() -> None:
         "view": cmd_view, "log": cmd_log, "login": cmd_login,
         "push": cmd_push, "tag": cmd_tag, "publish": cmd_publish,
         "delete": cmd_delete, "review": cmd_review, "consent": cmd_consent,
-        "update": cmd_update, "uninstall": cmd_uninstall,
+        "update": cmd_update, "reset": cmd_reset, "uninstall": cmd_uninstall,
         "extension": cmd_extension,
         "journal": cmd_journal,
         "intro": lambda _: _print_intro(),
