@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.1] — 2026-04-06
+
+### Fixed
+- macOS daemon segfault: replaced `os.fork()` with `subprocess.Popen()` — CoreFoundation crash after fork killed all capture agents, producing 0 events
+- Hook type mismatches: `task_created`→`task_start`, `task_completed`→`task_end`, added required `tool` field to all hook metadata
+- Unmapped hook events dropped instead of sent as invalid `claude_code_event` type (rejected entire batch)
+- Daemon output logged to `~/.methodproof/daemon.log` instead of `/dev/null`
+- ~20 silent `except Exception: pass` blocks replaced with structured logging across bridge, hooks, live streaming, sync, keychain, MCP, and proxy
+
+### Changed
+- Daemon health check on startup — immediate error if daemon exits
+- Extension status check shows actual error on failure
+
 ## [0.3.4] — 2026-04-05
 
 ### Added
