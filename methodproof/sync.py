@@ -102,20 +102,28 @@ def push(session_id: str, token: str, api_url: str) -> str:
     event_hashes = store.get_event_hashes(session_id)
     hash_lookup = {h["event_id"]: h["hash"] for h in event_hashes}
     total = len(events)
-    for i in range(0, total, 100):
-        batch = events[i:i + 100]
-        payload = [{"id": e["id"], "type": e["type"],
-                     "timestamp": _iso(e["timestamp"]),
-                     "timestamp_raw": e["timestamp"],
-                     "duration_ms": int(e["duration_ms"]),
-                     "metadata": json.loads(e["metadata"]),
-                     "hash": hash_lookup.get(e["id"], "")}
-                    for e in batch]
-        _request("POST", f"/sessions/{remote_id}/events", api_url, token,
-                 {"events": payload})
-        done = min(i + 100, total)
-        print(f"\r  Uploading: {done}/{total} events", end="", flush=True)
-    print()
+    try:
+        for i in range(0, total, 100):
+            batch = events[i:i + 100]
+            payload = [{"id": e["id"], "type": e["type"],
+                         "timestamp": _iso(e["timestamp"]),
+                         "timestamp_raw": e["timestamp"],
+                         "duration_ms": int(e["duration_ms"]),
+                         "metadata": json.loads(e["metadata"]),
+                         "hash": hash_lookup.get(e["id"], "")}
+                        for e in batch]
+            _request("POST", f"/sessions/{remote_id}/events", api_url, token,
+                     {"events": payload})
+            done = min(i + 100, total)
+            print(f"\r  Uploading: {done}/{total} events", end="", flush=True)
+        print()
+    except SystemExit:
+        # Event upload failed — abandon the remote session so it doesn't show as LIVE
+        try:
+            _request("PUT", f"/personal/sessions/{remote_id}/abandon", api_url, token)
+        except Exception:
+            pass
+        raise
 
     # Attestation (if signing key available)
     from methodproof.integrity import has_keypair
