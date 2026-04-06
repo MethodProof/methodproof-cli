@@ -466,6 +466,8 @@ def _print_commands() -> None:
     print(f"  {_W}ACCOUNT{R}")
     print(f"    {_M}mp login{R}              Connect to platform (opens browser)")
     print(f"    {_M}mp consent{R}            Change capture, research, and redaction settings")
+    print(f"    {_M}mp lock{R}                Destroy local encryption key {_D}(reversible){R}")
+    print(f"    {_M}mp lock --purge{R}        Delete all local data {_D}(irreversible){R}")
     print(f"    {_M}mp reset{R}               Clear login and consent (keeps sessions)")
     print(f"    {_M}mp delete{R} {_D}<id>{R}        Delete a session and all its data")
     print(f"    {_M}mp update{R}              Update to the latest version")
@@ -501,6 +503,8 @@ def _print_commands_plain() -> None:
     print("  ACCOUNT")
     print("    mp login              Connect to platform (opens browser)")
     print("    mp consent            Change capture, research, and redaction settings")
+    print("    mp lock               Destroy local encryption key (reversible)")
+    print("    mp lock --purge       Delete all local data (irreversible)")
     print("    mp reset              Clear login and consent (keeps sessions)")
     print("    mp delete <id>        Delete a session and all its data")
     print("    mp update             Update to the latest version")
@@ -607,6 +611,25 @@ def cmd_uninstall(args: argparse.Namespace) -> None:
         print(f"  Session data preserved at: {config.DB_PATH}")
         print("  Re-install and run `mp init` to resume.")
     print("  Restart your shell to clear hooks.\n")
+
+
+def cmd_lock(args: argparse.Namespace) -> None:
+    """Destroy local key access. --purge deletes DB entirely."""
+    cfg = config.load()
+    account_id = cfg.get("account_id", "")
+    if not account_id:
+        print("No account linked. Nothing to lock.")
+        return
+    purge = getattr(args, "purge", False)
+    if not args.force:
+        action = "DELETE all local data" if purge else "lock encrypted fields"
+        answer = input(f"  {action}? [y/N]: ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("  Cancelled.")
+            return
+    from methodproof.lock import lock
+    lock(account_id, purge=purge)
+    print("  Done.\n")
 
 
 def cmd_reset(args: argparse.Namespace) -> None:
@@ -782,6 +805,13 @@ def _setup_master_key(cfg: dict) -> None:
     print(f"  │  {D}This is the only way to recover your data{R}      │")
     print(f"  │  {D}on a new device. Store it somewhere safe.{R}      │")
     print(f"  └──────────────────────────────────────────────────┘\n")
+
+    # Encrypt any existing plaintext events
+    db_key = derive_db_key(master, account_id)
+    from methodproof.migrate_db import migrate_encrypt
+    count = migrate_encrypt(db_key)
+    if count:
+        print(f"  Encrypted {count} existing events.\n")
 
 
 def _recover_master_key(cfg: dict, account_id: str) -> None:
@@ -1585,6 +1615,9 @@ def main() -> None:
                          help="Enable auto-update before each mp start (recommended)")
     up_auto.add_argument("--no-auto", dest="auto", action="store_false",
                          help="Disable auto-update")
+    lk = sub.add_parser("lock", help="Destroy local encryption key (reversible with recovery phrase)")
+    lk.add_argument("--force", "-f", action="store_true", help="Skip confirmation")
+    lk.add_argument("--purge", action="store_true", help="Also delete the entire database (irreversible)")
     rs = sub.add_parser("reset", help="Clear login and consent settings (keeps sessions and hooks)")
     rs.add_argument("--force", "-f", action="store_true", help="Skip confirmation")
     un = sub.add_parser("uninstall", help="Remove all hooks, data, and config")
@@ -1616,7 +1649,7 @@ def main() -> None:
         "view": cmd_view, "log": cmd_log, "login": cmd_login,
         "push": cmd_push, "tag": cmd_tag, "publish": cmd_publish,
         "delete": cmd_delete, "review": cmd_review, "consent": cmd_consent,
-        "update": cmd_update, "reset": cmd_reset, "uninstall": cmd_uninstall,
+        "update": cmd_update, "lock": cmd_lock, "reset": cmd_reset, "uninstall": cmd_uninstall,
         "extension": cmd_extension,
         "journal": cmd_journal,
         "intro": lambda _: _print_intro(),
