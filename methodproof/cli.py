@@ -89,7 +89,7 @@ def _print_intro() -> None:
     print(f"    {D}See how you code. Prove how you build.{R}")
     print(f"\n  {bar}\n")
     print(f"   ┌────────────────────────────────────────────────┐")
-    print(f"   │  {Y}SHARE{R}     push · publish · live stream        │")
+    print(f"   │  {Y}SHARE{R}     push · publish · anonymous · live   │")
     print(f"   ├────────────────────────────────────────────────┤")
     print(f"   │  {C}GRAPH{R}     knowledge graph · moments · edges   │")
     print(f"   ├────────────────────────────────────────────────┤")
@@ -101,6 +101,7 @@ def _print_intro() -> None:
     print(f"   {D}3.{R} {G}mp stop{R}        build your process graph")
     print(f"   {D}4.{R} {G}mp push{R}        upload to your profile")
     print()
+    print(f"   {D}Publish anonymously (Pro) or contribute to research.{R}")
     print(f"   {D}All data stays local until you push.{R}\n")
 
 
@@ -110,7 +111,7 @@ def _print_intro_plain() -> None:
     print("    See how you code. Prove how you build.")
     print("\n  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
     print("   ┌────────────────────────────────────────────────┐")
-    print("   │  SHARE     push · publish · live stream        │")
+    print("   │  SHARE     push · publish · anonymous · live   │")
     print("   ├────────────────────────────────────────────────┤")
     print("   │  GRAPH     knowledge graph · moments · edges   │")
     print("   ├────────────────────────────────────────────────┤")
@@ -122,6 +123,7 @@ def _print_intro_plain() -> None:
     print("   3. mp stop        build your process graph")
     print("   4. mp push        upload to your profile")
     print()
+    print("   Publish anonymously (Pro) or contribute to research.")
     print("   All data stays local until you push.\n")
 
 
@@ -453,6 +455,7 @@ def _print_commands() -> None:
     print(f"  {_W}SHARE{R}")
     print(f"    {_Y}mp push{R}  {_D}[id]{R}          Upload privately to your account")
     print(f"    {_Y}mp publish{R} {_D}[id]{R}        Make session public (redaction applied)")
+    print(f"    {_Y}mp publish --anonymous{R}  Public but identity hidden {_D}(Pro){R}")
     print(f"    {_Y}mp tag{R} {_D}<id> <tags>{R}     Tag a session")
     print()
     print(f"  {_W}EXTENSION{R}")
@@ -487,6 +490,7 @@ def _print_commands_plain() -> None:
     print("  SHARE")
     print("    mp push  [id]         Upload privately to your account")
     print("    mp publish [id]       Make session public (redaction applied)")
+    print("    mp publish --anonymous  Public but identity hidden (Pro)")
     print("    mp tag <id> <tags>    Tag a session")
     print()
     print("  EXTENSION")
