@@ -51,7 +51,7 @@ if command -v jq >/dev/null 2>&1; then
       ;;
     TaskCreated)
       TYPE="task_created"
-      META=$(echo "$INPUT" | jq -c '{task_id: (.task_id // ""), subject: (.subject // "")}' 2>/dev/null || echo '{}')
+      META=$(echo "$INPUT" | jq -c '{task_id: (.task_id // ""), subject: (.task_subject // "")}' 2>/dev/null || echo '{}')
       ;;
     TaskCompleted)
       TYPE="task_completed"

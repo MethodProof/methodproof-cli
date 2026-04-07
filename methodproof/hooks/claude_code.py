@@ -45,7 +45,7 @@ _META_EXTRACTORS = {
     "PostToolUse": lambda d: {"tool": _TOOL, "tool_name": d.get("tool_name", "unknown"), "success": True},
     "SubagentStart": lambda d: {"tool": _TOOL, "agent_type": d.get("agent_type", "unknown"), "agent_id": d.get("agent_id", "")},
     "SubagentStop": lambda d: {"tool": _TOOL, "agent_type": d.get("agent_type", "unknown"), "agent_id": d.get("agent_id", "")},
-    "TaskCreated": lambda d: {"tool": _TOOL, "task_id": d.get("task_id", ""), "subject": d.get("subject", "")},
+    "TaskCreated": lambda d: {"tool": _TOOL, "task_id": d.get("task_id", ""), "subject": d.get("task_subject", "")},
     "TaskCompleted": lambda d: {"tool": _TOOL, "task_id": d.get("task_id", "")},
     "SessionStart": lambda d: {"tool": _TOOL, "session_id": d.get("session_id", ""), "cwd": d.get("cwd", "")},
 }
