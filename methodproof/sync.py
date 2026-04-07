@@ -102,9 +102,10 @@ def push(session_id: str, token: str, api_url: str) -> str:
     event_hashes = store.get_event_hashes(session_id)
     hash_lookup = {h["event_id"]: h["hash"] for h in event_hashes}
     total = len(events)
+    batch_size = 500
     try:
-        for i in range(0, total, 100):
-            batch = events[i:i + 100]
+        for i in range(0, total, batch_size):
+            batch = events[i:i + batch_size]
             payload = [{"id": e["id"], "type": e["type"],
                          "timestamp": _iso(e["timestamp"]),
                          "timestamp_raw": e["timestamp"],
@@ -112,9 +113,18 @@ def push(session_id: str, token: str, api_url: str) -> str:
                          "metadata": json.loads(e["metadata"]),
                          "hash": hash_lookup.get(e["id"], "")}
                         for e in batch]
-            _request("POST", f"/sessions/{remote_id}/events", api_url, token,
-                     {"events": payload})
-            done = min(i + 100, total)
+            for attempt in range(5):
+                try:
+                    _request("POST", f"/sessions/{remote_id}/events", api_url, token,
+                             {"events": payload})
+                    break
+                except SystemExit as exc:
+                    if "429" in str(exc) and attempt < 4:
+                        import time
+                        time.sleep(10 * (attempt + 1))
+                    else:
+                        raise
+            done = min(i + batch_size, total)
             print(f"\r  Uploading: {done}/{total} events", end="", flush=True)
         print()
     except SystemExit:
