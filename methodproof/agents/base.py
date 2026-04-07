@@ -145,17 +145,17 @@ def emit(event_type: str, metadata: dict[str, Any]) -> None:
     if _e2e_key:
         from methodproof.crypto import encrypt_metadata
         entry["metadata"] = encrypt_metadata(dict(entry["metadata"]), _e2e_key)
-    global _prev_hash
-    from methodproof.integrity import compute_event_hash
-    entry["_chain_hash"] = compute_event_hash(entry, _prev_hash, _account_id)
-    _prev_hash = entry["_chain_hash"]
-    if _live_mode:
-        from methodproof import live as live_mod
-        live_mod.send(entry)
     with _lock:
+        global _prev_hash
+        from methodproof.integrity import compute_event_hash
+        entry["_chain_hash"] = compute_event_hash(entry, _prev_hash, _account_id)
+        _prev_hash = entry["_chain_hash"]
         _buffer.append(entry)
         if len(_buffer) >= _FLUSH_SIZE:
             _flush_locked()
+    if _live_mode:
+        from methodproof import live as live_mod
+        live_mod.send(entry)
 
 
 def flush() -> None:
