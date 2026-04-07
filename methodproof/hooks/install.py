@@ -21,9 +21,23 @@ _HOOK_PY = _HOOKS_DIR / "claude_code.py"
 HOOK_SCRIPT = _HOOK_PY if sys.platform == "win32" else _HOOK_SH
 
 HOOK_EVENTS = [
+    # Core (already captured)
     "UserPromptSubmit", "PreToolUse", "PostToolUse",
     "SubagentStart", "SubagentStop",
     "TaskCreated", "TaskCompleted", "SessionStart",
+    # New: interruptions, lifecycle, context
+    "PostToolUseFailure",        # tool failure + is_interrupt flag
+    "SessionEnd",                # session terminated
+    "Stop",                      # Claude finished responding (normal or interrupted)
+    "StopFailure",               # turn ended due to API error
+    "CwdChanged",                # working directory changed (ambiguous: human or Claude)
+    "PreCompact", "PostCompact", # context window compaction
+    "PermissionRequest",         # permission dialog shown
+    "PermissionDenied",          # auto mode denied a tool
+    "Elicitation",               # MCP requested user input
+    "ElicitationResult",         # user responded to MCP
+    "WorktreeCreate",            # git worktree created (parallel agent)
+    "WorktreeRemove",            # git worktree removed
 ]
 
 # --- Codex CLI ---

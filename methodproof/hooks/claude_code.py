@@ -24,14 +24,36 @@ def _build_prompt_meta(text: str) -> dict:
 
 
 _TYPE_MAP = {
+    # Human-initiated
     "UserPromptSubmit": "user_prompt",
+    # Tool lifecycle
     "PreToolUse": "tool_call",
     "PostToolUse": "tool_result",
+    "PostToolUseFailure": "tool_failure",
+    # Agent lifecycle
     "SubagentStart": "agent_launch",
     "SubagentStop": "agent_complete",
+    # Task lifecycle
     "TaskCreated": "task_start",
     "TaskCompleted": "task_end",
+    # Session lifecycle
     "SessionStart": "claude_session_start",
+    "SessionEnd": "claude_session_end",
+    "Stop": "agent_turn_end",
+    "StopFailure": "agent_turn_error",
+    # Context
+    "CwdChanged": "cwd_changed",
+    "PreCompact": "context_compact_start",
+    "PostCompact": "context_compact_end",
+    # Permissions
+    "PermissionRequest": "permission_request",
+    "PermissionDenied": "permission_denied",
+    # MCP
+    "Elicitation": "mcp_elicitation",
+    "ElicitationResult": "mcp_elicitation_result",
+    # Worktree
+    "WorktreeCreate": "worktree_create",
+    "WorktreeRemove": "worktree_remove",
 }
 
 _TOOL = "claude_code"
@@ -43,11 +65,35 @@ _META_EXTRACTORS = {
     },
     "PreToolUse": lambda d: {"tool": _TOOL, "tool_name": d.get("tool_name", "unknown")},
     "PostToolUse": lambda d: {"tool": _TOOL, "tool_name": d.get("tool_name", "unknown"), "success": True},
+    "PostToolUseFailure": lambda d: {
+        "tool": _TOOL, "tool_name": d.get("tool_name", "unknown"),
+        "success": False, "is_interrupt": d.get("is_interrupt", False),
+        "error": str(d.get("error", ""))[:200],
+    },
     "SubagentStart": lambda d: {"tool": _TOOL, "agent_type": d.get("agent_type", "unknown"), "agent_id": d.get("agent_id", "")},
-    "SubagentStop": lambda d: {"tool": _TOOL, "agent_type": d.get("agent_type", "unknown"), "agent_id": d.get("agent_id", "")},
+    "SubagentStop": lambda d: {
+        "tool": _TOOL, "agent_type": d.get("agent_type", "unknown"), "agent_id": d.get("agent_id", ""),
+        "last_message_preview": str(d.get("last_assistant_message", ""))[:200],
+    },
     "TaskCreated": lambda d: {"tool": _TOOL, "task_id": d.get("task_id", ""), "subject": d.get("task_subject", "")},
     "TaskCompleted": lambda d: {"tool": _TOOL, "task_id": d.get("task_id", "")},
     "SessionStart": lambda d: {"tool": _TOOL, "session_id": d.get("session_id", ""), "cwd": d.get("cwd", "")},
+    "SessionEnd": lambda d: {"tool": _TOOL, "session_id": d.get("session_id", "")},
+    "Stop": lambda d: {"tool": _TOOL},
+    "StopFailure": lambda d: {"tool": _TOOL, "error": str(d.get("error", ""))[:200]},
+    "CwdChanged": lambda d: {
+        "tool": _TOOL, "cwd": d.get("cwd", ""),
+        # NOTE: fires for both human `cd` and Claude tool use — caller is ambiguous
+        "source": "ambiguous",
+    },
+    "PreCompact": lambda d: {"tool": _TOOL},
+    "PostCompact": lambda d: {"tool": _TOOL},
+    "PermissionRequest": lambda d: {"tool": _TOOL, "tool_name": d.get("tool_name", "unknown")},
+    "PermissionDenied": lambda d: {"tool": _TOOL, "tool_name": d.get("tool_name", "unknown")},
+    "Elicitation": lambda d: {"tool": _TOOL},
+    "ElicitationResult": lambda d: {"tool": _TOOL},
+    "WorktreeCreate": lambda d: {"tool": _TOOL, "worktree_path": d.get("worktree_path", "")},
+    "WorktreeRemove": lambda d: {"tool": _TOOL, "worktree_path": d.get("worktree_path", "")},
 }
 
 

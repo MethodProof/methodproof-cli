@@ -47,7 +47,7 @@ if command -v jq >/dev/null 2>&1; then
       ;;
     SubagentStop)
       TYPE="agent_complete"
-      META=$(echo "$INPUT" | jq -c '{agent_type: (.agent_type // "unknown"), agent_id: (.agent_id // "")}' 2>/dev/null || echo '{}')
+      META=$(echo "$INPUT" | jq -c '{agent_type: (.agent_type // "unknown"), agent_id: (.agent_id // ""), last_message_preview: (.last_assistant_message // "" | .[0:200])}' 2>/dev/null || echo '{}')
       ;;
     TaskCreated)
       TYPE="task_created"
@@ -60,6 +60,54 @@ if command -v jq >/dev/null 2>&1; then
     SessionStart)
       TYPE="claude_session_start"
       META=$(echo "$INPUT" | jq -c '{claude_session_id: (.session_id // ""), cwd: (.cwd // "")}' 2>/dev/null || echo '{}')
+      ;;
+    PostToolUseFailure)
+      TYPE="tool_failure"
+      META=$(echo "$INPUT" | jq -c '{tool_name: (.tool_name // "unknown"), is_interrupt: (.is_interrupt // false), error: (.error // "" | .[0:200])}' 2>/dev/null || echo '{}')
+      ;;
+    SessionEnd)
+      TYPE="claude_session_end"
+      META=$(echo "$INPUT" | jq -c '{claude_session_id: (.session_id // "")}' 2>/dev/null || echo '{}')
+      ;;
+    Stop)
+      TYPE="agent_turn_end"
+      META='{"tool":"claude_code"}'
+      ;;
+    StopFailure)
+      TYPE="agent_turn_error"
+      META=$(echo "$INPUT" | jq -c '{error: (.error // "" | .[0:200])}' 2>/dev/null || echo '{}')
+      ;;
+    CwdChanged)
+      TYPE="cwd_changed"
+      META=$(echo "$INPUT" | jq -c '{cwd: (.cwd // ""), source: "ambiguous"}' 2>/dev/null || echo '{}')
+      ;;
+    PreCompact)
+      TYPE="context_compact_start"
+      META='{"tool":"claude_code"}'
+      ;;
+    PostCompact)
+      TYPE="context_compact_end"
+      META='{"tool":"claude_code"}'
+      ;;
+    PermissionRequest)
+      TYPE="permission_request"
+      META=$(echo "$INPUT" | jq -c '{tool_name: (.tool_name // "unknown")}' 2>/dev/null || echo '{}')
+      ;;
+    PermissionDenied)
+      TYPE="permission_denied"
+      META=$(echo "$INPUT" | jq -c '{tool_name: (.tool_name // "unknown")}' 2>/dev/null || echo '{}')
+      ;;
+    WorktreeCreate)
+      TYPE="worktree_create"
+      META=$(echo "$INPUT" | jq -c '{worktree_path: (.worktree_path // "")}' 2>/dev/null || echo '{}')
+      ;;
+    WorktreeRemove)
+      TYPE="worktree_remove"
+      META=$(echo "$INPUT" | jq -c '{worktree_path: (.worktree_path // "")}' 2>/dev/null || echo '{}')
+      ;;
+    Elicitation|ElicitationResult)
+      TYPE=$(echo "$EVENT" | sed 's/Elicitation$/mcp_elicitation/;s/ElicitationResult/mcp_elicitation_result/')
+      META='{"tool":"claude_code"}'
       ;;
     *)
       TYPE="claude_code_event"
