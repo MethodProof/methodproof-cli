@@ -52,6 +52,87 @@ methodproof view      # explore your session in the browser
 - **Auto-detection** — hooks for shell, Claude Code, OpenClaw, codex, gemini, aider installed automatically
 - **Platform sync** — `methodproof push` uploads sessions. `methodproof publish` makes them public and shareable
 
+## Security Architecture
+
+Every event passes through consent gating, encryption, and hash chaining before touching disk. The platform adds a server co-signature on push, creating two-party evidence.
+
+```mermaid
+flowchart TB
+    subgraph LOCAL["LOCAL MACHINE"]
+        direction TB
+        subgraph AGENTS["Capture Agents"]
+            direction LR
+            W["File Watcher"] & T["Terminal Hook"] & B["Browser Bridge"] & H["AI Tool Hooks"]
+        end
+        W & T & B & H -->|"raw event"| EMIT["emit(type, metadata)"]
+
+        subgraph CONSENT["Consent Layer"]
+            direction TB
+            EMIT --> EG{"Event Gate"}
+            EG -->|"category OFF"| DROP["Dropped"]
+            EG -->|"category ON"| FG["Field Gate: strip opted-out fields"]
+            FG --> JG{"Journal Mode?"}
+            JG -->|"OFF: structural only"| STRIP["Strip content fields"]
+            JG -->|"ON: full content"| KEEP["Keep all fields"]
+        end
+
+        subgraph CRYPTO["Encryption + Integrity"]
+            direction TB
+            STRIP & KEEP --> AES["AES-256-GCM: encrypt sensitive fields"]
+            AES --> LOCK["Thread Lock: atomic hash + buffer"]
+            LOCK --> CHAIN["SHA-256 Hash Chain"]
+            CHAIN --> BUF["Batched Flush"]
+        end
+
+        BUF --> DB[("SQLite WAL")]
+        BUF -.->|"--live"| WS["WebSocket Stream"]
+
+        subgraph KEYS["Key Vault"]
+            direction LR
+            ENT["Entropy"] --> KDF["Key Derivation"]
+            KDF --> DBK["Encryption Key"]
+            KDF --> BINDK["Binding Key"]
+            KDF --> ED25["Signing Key"]
+            ENT -.-> REC["Recovery Phrase"]
+            KDF -.-> KC["OS Keychain"]
+        end
+    end
+
+    subgraph PUSH["PUSH PROTOCOL"]
+        direction TB
+        DB --> BATCH["Batched Upload"]
+        BATCH --> BIND["Session Binding: HMAC over session metadata"]
+        BIND --> SIGN["Ed25519 Sign: session summary"]
+    end
+
+    subgraph PLATFORM["PLATFORM TRUST BOUNDARY"]
+        direction TB
+        SIGN --> VERIFY["Verify Ed25519 against registered public key"]
+        VERIFY --> COSIG["Server Co-Sign: HMAC over attestation receipt"]
+        COSIG --> NEO[("Graph Store")]
+        NEO --> SCORE["Integrity Score: chain + attestation + cosig + git xref + anomaly"]
+    end
+
+    style DROP fill:#d93326,stroke:#d93326,color:#fff
+    style AES fill:#803794,stroke:#803794,color:#fff
+    style CHAIN fill:#803794,stroke:#803794,color:#fff
+    style LOCK fill:#803794,stroke:#803794,color:#fff
+    style EG fill:#109446,stroke:#109446,color:#fff
+    style JG fill:#109446,stroke:#109446,color:#fff
+    style STRIP fill:#109446,stroke:#109446,color:#fff
+    style VERIFY fill:#c9a84c,stroke:#c9a84c,color:#fff
+    style COSIG fill:#c9a84c,stroke:#c9a84c,color:#fff
+    style SCORE fill:#c9a84c,stroke:#c9a84c,color:#fff
+    style SIGN fill:#192a56,stroke:#192a56,color:#fff
+    style BIND fill:#192a56,stroke:#192a56,color:#fff
+    style DB fill:#192a56,stroke:#192a56,color:#fff
+    style NEO fill:#192a56,stroke:#192a56,color:#fff
+    style KC fill:#803794,stroke:#803794,color:#fff
+    style REC fill:#803794,stroke:#803794,color:#fff
+```
+
+<sup>Green = consent gates · Purple = cryptographic operations · Navy = storage + binding · Gold = integrity verification</sup>
+
 ## Commands
 
 | Command | What it does |
@@ -152,13 +233,15 @@ At session end, outcome metrics are computed: first-shot apply rate, follow-up s
 <details>
 <summary>Integrity verification</summary>
 
-Three layers ensure session data hasn't been tampered with:
+Four layers ensure session data hasn't been tampered with (see [architecture diagram](#security-architecture) above):
 
-**Hash-chained events** — every event includes a SHA-256 hash linking to the previous event. Any modification breaks the chain, detectable via `GET /sessions/{id}/chain/verify`.
+**Hash-chained events** — every event includes a SHA-256 hash linking to the previous event. Hash computation is thread-safe (atomic with buffer append). Any modification breaks the chain, detectable via `GET /sessions/{id}/chain/verify`.
 
-**Ed25519 attestation** — on `methodproof push`, the CLI signs a session summary with your private key. Install with `pip install methodproof[signing]`. Key generated during `methodproof init`, stored in `~/.methodproof/config.json`.
+**Ed25519 attestation** — on `methodproof push`, the CLI signs a session summary with your private key. Key generated during `methodproof init`, stored in `~/.methodproof/`.
 
-**Binary hash self-reporting** — the CLI reports its own binary hash on push. The platform compares against known release hashes to detect modified builds.
+**Server co-signature** — the platform independently signs the attestation receipt with its own key and timestamp, creating two-party evidence. Sessions pushed without server co-signature receive a lower integrity score.
+
+**Binary hash self-reporting** — the CLI reports its own source hash on push. The platform compares against known release hashes to detect modified builds.
 
 </details>
 
@@ -207,7 +290,7 @@ methodproof start
 
 **Excluded patterns:** `__pycache__`, `.pyc`, `.git/`, `node_modules`, `.DS_Store`, `.swp`, temp files ending in `~`
 
-**Git commits** are detected by polling `.git/refs/heads/` every 2 seconds — only commits in a git repo rooted at (or above) the watch directory are captured.
+**Git commits** are detected automatically — only commits in a git repo rooted at (or above) the watch directory are captured.
 
 ## Data Directory
 
