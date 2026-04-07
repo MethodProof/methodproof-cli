@@ -107,6 +107,8 @@ JOURNAL_CONTENT_FIELDS: list[tuple[str, str]] = [
     ("browser_ai_chat", "url"),
     # Inline completions — provider detail
     ("inline_completion_accepted", "text_length"),
+    # Tasks — subject reveals intent
+    ("task_created", "subject"),
 ]
 
 
