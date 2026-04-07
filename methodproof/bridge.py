@@ -12,7 +12,8 @@ _session_id = ""
 _api_token = ""
 _api_base = ""
 _e2e_key = ""
-_pairing: dict[str, Any] = {}  # {token: {session_id, api_token, api_base, e2e_key, paired}}
+_journal = False
+_pairing: dict[str, Any] = {}  # {token: {session_id, api_token, api_base, e2e_key, journal, paired}}
 _extension_paired = threading.Event()
 MAX_BODY = 10 * 1024 * 1024  # 10 MB
 
@@ -47,6 +48,7 @@ PAIR_PAGE = """<!DOCTYPE html>
          data-token="{api_token}"
          data-api-base="{api_base}"
          data-e2e-key="{e2e_key}"
+         data-journal="{journal}"
          style="display:none"></div>
   </div>
   <script>
@@ -62,11 +64,12 @@ PAIR_PAGE = """<!DOCTYPE html>
 </html>"""
 
 
-def generate_pair_token(session_id: str, api_token: str, api_base: str, e2e_key: str = "") -> str:
+def generate_pair_token(session_id: str, api_token: str, api_base: str,
+                        e2e_key: str = "", journal: bool = False) -> str:
     token = secrets.token_urlsafe(16)
     _pairing[token] = {
         "session_id": session_id, "api_token": api_token,
-        "api_base": api_base, "e2e_key": e2e_key, "paired": False,
+        "api_base": api_base, "e2e_key": e2e_key, "journal": journal, "paired": False,
     }
     return token
 
@@ -92,6 +95,7 @@ class _Handler(BaseHTTPRequestHandler):
                 api_token=data["api_token"],
                 api_base=data["api_base"],
                 e2e_key=data["e2e_key"],
+                journal="true" if data.get("journal") else "false",
                 pair_token=token,
             ).encode()
             self.send_response(200)
@@ -109,6 +113,7 @@ class _Handler(BaseHTTPRequestHandler):
                     "token": _api_token,
                     "api_base": _api_base,
                     "e2e_key": _e2e_key,
+                    "journal": _journal,
                 })
                 _extension_paired.set()
                 base.log("info", "extension.auto_paired", session_id=_session_id)
@@ -149,6 +154,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "api_token": body.get("api_token", ""),
                 "api_base": body.get("api_base", ""),
                 "e2e_key": body.get("e2e_key", ""),
+                "journal": body.get("journal", False),
                 "paired": False,
             }
             self._json({"ok": True, "token": token})
@@ -185,12 +191,14 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def start(session_id: str, stop: threading.Event, port: int = 9877,
-          api_token: str = "", api_base: str = "", e2e_key: str = "") -> None:
-    global _session_id, _api_token, _api_base, _e2e_key
+          api_token: str = "", api_base: str = "", e2e_key: str = "",
+          journal: bool = False) -> None:
+    global _session_id, _api_token, _api_base, _e2e_key, _journal
     _session_id = session_id
     _api_token = api_token
     _api_base = api_base
     _e2e_key = e2e_key
+    _journal = journal
     _extension_paired.clear()
     HTTPServer.allow_reuse_address = True
     server = HTTPServer(("127.0.0.1", port), _Handler)

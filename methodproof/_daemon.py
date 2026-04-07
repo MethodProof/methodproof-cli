@@ -64,7 +64,8 @@ def main() -> None:
         threads.append(threading.Thread(
             target=bridge.start,
             args=(sid, stop_event, 9877,
-                  cfg.get("token", ""), cfg.get("api_url", ""), cfg.get("e2e_key", "")),
+                  cfg.get("token", ""), cfg.get("api_url", ""), cfg.get("e2e_key", ""),
+                  cfg.get("journal_mode", False)),
             daemon=True,
         ))
 
