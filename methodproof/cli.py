@@ -337,6 +337,11 @@ def cmd_init(args: argparse.Namespace) -> None:
     if not cfg.get("consent_acknowledged"):
         cfg = _run_consent(cfg)
         config.save(cfg)
+        if cfg.get("token"):
+            cfg["_pending_research_sync"] = True
+            config.save(cfg)
+            from methodproof.sync import sync_research_consent
+            sync_research_consent(cfg["token"], cfg["api_url"])
         print()
 
     capture = cfg.get("capture", {})
@@ -678,6 +683,11 @@ def cmd_consent(args: argparse.Namespace) -> None:
     print(f"\n{_banner()}\n")
     cfg = _run_consent_detailed(cfg)
     config.save(cfg)
+    if cfg.get("token"):
+        cfg["_pending_research_sync"] = True
+        config.save(cfg)
+        from methodproof.sync import sync_research_consent
+        sync_research_consent(cfg["token"], cfg["api_url"])
     print(f"\n{_banner()} settings saved.\n")
     _print_commands()
 
@@ -851,14 +861,20 @@ def _recover_master_key(cfg: dict, account_id: str) -> None:
 
 
 def _is_daemon_alive() -> bool:
-    """Check if the recording daemon is still running."""
+    """Check if the recording daemon is still running (not a reused PID)."""
     if not PIDFILE.exists():
         return False
     try:
         pid = int(PIDFILE.read_text().strip())
-        os.kill(pid, 0)  # signal 0 = check existence without killing
-        return True
+        os.kill(pid, 0)
     except (ProcessLookupError, ValueError, OSError):
+        return False
+    # Verify the PID is actually a methodproof process (PIDs get reused after reboot)
+    try:
+        import subprocess
+        out = subprocess.check_output(["ps", "-p", str(pid), "-o", "args="], text=True).strip()
+        return "methodproof" in out
+    except Exception:
         return False
 
 
@@ -1275,6 +1291,8 @@ def cmd_login(args: argparse.Namespace) -> None:
                 config.save(cfg)
                 print(" done.\n")
                 _setup_master_key(cfg)
+                from methodproof.sync import sync_research_consent
+                sync_research_consent(cfg["token"], cfg["api_url"])
                 print("Logged in. Run `methodproof push` to upload sessions.")
                 return
         except Exception:
@@ -1289,6 +1307,9 @@ def cmd_push(args: argparse.Namespace) -> None:
     if not cfg.get("token"):
         print("Run `methodproof login` first.")
         sys.exit(1)
+    from methodproof.sync import sync_research_consent
+    sync_research_consent(cfg["token"], cfg["api_url"])
+    cfg = config.load()
     sid = args.session_id or _latest()
     if not sid:
         print("No sessions to push.")

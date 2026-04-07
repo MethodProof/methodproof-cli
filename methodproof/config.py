@@ -34,6 +34,8 @@ _DEFAULTS: dict[str, Any] = {
         "code_capture": False,
     },
     "research_consent": False,
+    "contribution_level": None,
+    "_pending_research_sync": False,
     "journal_mode": False,
     "journal_credits": 2,
     "e2e_mode": False,

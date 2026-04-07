@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.1] — 2026-04-07
+
+### Fixed
+- **7 GB database bloat** — `artifacts` table lacked a UNIQUE constraint on `path`, causing `_ensure_artifact` to insert a duplicate row per `file_edit`. The `_link_action_artifacts` JOIN then produced a cartesian explosion (39.9M rows from 16K events). Added UNIQUE constraint + migration that deduplicates existing data on upgrade.
+- **Stale PID after reboot** — `_is_daemon_alive()` only checked `os.kill(pid, 0)`, which succeeds if the OS reused the PID for an unrelated process. Now verifies the process name contains "methodproof" via `ps`. Prevents killing random processes and unblocks `mp stop`/`mp start` after a system restart.
+- **SQLite hang on locked database** — `sqlite3.connect()` had no timeout, so a crashed daemon holding a WAL lock caused `mp stop` to hang forever. Added `timeout=10`.
+
+### Added
+- **Research consent sync** — `mp init`, `mp consent`, `mp login`, and `mp push` now sync research opt-in state between CLI and platform. Local changes are flagged with `_pending_research_sync` and pushed on next authenticated call; canonical state is always pulled from the platform.
+
 ## [0.7.0] — 2026-04-07
 
 ### Fixed

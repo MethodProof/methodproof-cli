@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS resources (
     UNIQUE(type, identifier)
 );
 CREATE TABLE IF NOT EXISTS artifacts (
-    id TEXT PRIMARY KEY, path TEXT NOT NULL, type TEXT DEFAULT 'file',
+    id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, type TEXT DEFAULT 'file',
     size_bytes INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS action_resources (
@@ -65,7 +65,7 @@ _conn: sqlite3.Connection | None = None
 def _db() -> sqlite3.Connection:
     global _conn
     if _conn is None:
-        _conn = sqlite3.connect(str(config.DB_PATH), check_same_thread=False)
+        _conn = sqlite3.connect(str(config.DB_PATH), check_same_thread=False, timeout=10)
         _conn.execute("PRAGMA journal_mode=WAL")
         _conn.row_factory = sqlite3.Row
     return _conn
@@ -107,6 +107,12 @@ def _migrate() -> None:
         "CREATE TABLE IF NOT EXISTS event_hashes "
         "(event_id TEXT PRIMARY KEY REFERENCES events(id), hash TEXT NOT NULL)"
     )
+    # Deduplicate artifacts and add UNIQUE index on path (fixes cartesian join bug)
+    indexes = {r[1] for r in db.execute("PRAGMA index_list(artifacts)").fetchall()}
+    if "idx_artifacts_path" not in indexes:
+        db.execute("DELETE FROM action_artifacts")
+        db.execute("DELETE FROM artifacts WHERE rowid NOT IN (SELECT MIN(rowid) FROM artifacts GROUP BY path)")
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_path ON artifacts(path)")
     db.commit()
 
 

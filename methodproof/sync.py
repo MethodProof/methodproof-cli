@@ -179,3 +179,30 @@ def push(session_id: str, token: str, api_url: str) -> str:
 def _iso(ts: float) -> str:
     from datetime import datetime, UTC
     return datetime.fromtimestamp(ts, tz=UTC).isoformat()
+
+
+def sync_research_consent(token: str, api_url: str) -> None:
+    """Sync research consent between CLI (cache) and platform (source of truth)."""
+    from methodproof import config
+    from methodproof.agents.base import log
+
+    try:
+        cfg = config.load()
+
+        # Push pending local change first
+        if cfg.get("_pending_research_sync"):
+            _request("PUT", "/research/opt-in", api_url, token, {
+                "opt_in": cfg.get("research_consent", False),
+                "contribution_level": cfg.get("contribution_level") or "structural",
+            })
+            cfg["_pending_research_sync"] = False
+            config.save(cfg)
+
+        # Pull canonical state from platform
+        status = _request("GET", "/research/status", api_url, token)
+        cfg = config.load()
+        cfg["research_consent"] = status.get("opt_in", False)
+        cfg["contribution_level"] = status.get("contribution_level")
+        config.save(cfg)
+    except (SystemExit, Exception) as exc:
+        log("warning", "sync.research_consent_failed", error=str(exc))
