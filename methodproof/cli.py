@@ -101,7 +101,7 @@ def _print_intro() -> None:
     print(f"   {D}3.{R} {G}mp stop{R}        build your process graph")
     print(f"   {D}4.{R} {G}mp push{R}        upload to your profile")
     print()
-    print(f"   {D}Publish anonymously (Pro) or contribute to research.{R}")
+    print(f"   {D}Your process is worth studying.{R}")
     print(f"   {D}All data stays local until you push.{R}\n")
 
 
@@ -123,7 +123,7 @@ def _print_intro_plain() -> None:
     print("   3. mp stop        build your process graph")
     print("   4. mp push        upload to your profile")
     print()
-    print("   Publish anonymously (Pro) or contribute to research.")
+    print("   Your process is worth studying.")
     print("   All data stays local until you push.\n")
 
 
@@ -163,7 +163,7 @@ def _print_journal_intro(credits: int) -> None:
 def _run_consent(cfg: dict) -> dict:
     """Simplified consent flow: accept defaults or customize."""
     print(f"\n{_banner()}\n")
-    print("  Built by engineers, for engineers.\n")
+    print("  Welcome, fellow researcher.\n")
     print("  All data stays local in ~/.methodproof/. Nothing leaves your")
     print("  machine unless you explicitly run `mp push` or `mp publish`.\n")
     print("  MethodProof records structural metadata about your workflow:")
