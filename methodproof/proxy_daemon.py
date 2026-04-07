@@ -44,12 +44,27 @@ def _post_event(event_type: str, metadata: dict) -> None:
         sys.stderr.write(f"proxy.bridge_post_failed type={event_type} error={exc}\n")
 
 
+_BUILTIN_LOCAL_PORTS = {"11434", "18789", "1234"}  # Ollama, Claude Desktop, Jan
+
+
+def _load_local_ports() -> set[str]:
+    """Load user-configured local AI ports from config."""
+    try:
+        from methodproof import config
+        cfg = config.load()
+        return _BUILTIN_LOCAL_PORTS | {str(p) for p in cfg.get("local_ai_ports", [])}
+    except Exception:
+        return _BUILTIN_LOCAL_PORTS
+
+
 def _is_ai_domain(domain: str) -> bool:
     for ai in AI_DOMAINS:
         if domain == ai or domain.endswith(f".{ai}"):
             return True
-    if "localhost" in domain and any(p in domain for p in [":11434", ":18789", ":1234"]):
-        return True
+    if "localhost" in domain or "127.0.0.1" in domain:
+        ports = _load_local_ports()
+        if any(f":{p}" in domain for p in ports):
+            return True
     if "bedrock-runtime" in domain and "amazonaws.com" in domain:
         return True
     if "openai.azure.com" in domain:

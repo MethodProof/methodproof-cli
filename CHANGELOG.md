@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0] — 2026-04-07
+
+### Fixed
+- **Runaway event logging** — watcher ignored only 7 patterns, tracking 35K+ files including `.venv/` (20K), `dist/build/` (23K). Expanded to 30+ ignore patterns covering Python, JS/TS, Rust, Go, Java, Ruby, PHP, .NET, Swift, and build artifacts. **138K → 1,442 files (99% reduction)**
+- **Claude Code hook errors** — hook script pointed to deleted pyenv site-packages path; added pidfile guard (`exit 0` when no session active) to prevent bridge connection failures
+
+### Added
+- **Configurable local AI ports** — `mp init` now asks about local LLM servers (Ollama, LM Studio, vLLM, etc.) and adds user-specified ports to the proxy allowlist. Previously only 3 hardcoded ports (11434, 18789, 1234) were captured; custom ports were invisible to the proxy decoder.
+- `mp start --streaming` — blocking foreground mode, streams every captured event to stdout in real-time with human-readable formatting
+- `mp start --verbose` / `-v` — structured debug logging at each step (config, auth, session, anchor, daemon spawn); daemon log includes agent init and buffer/flush stats
+- Step-by-step progress output on default `mp start` (`→ Loading config`, `→ Checking hooks`, etc.) so failures are immediately locatable
+
 ## [0.5.1] — 2026-04-06
 
 ### Fixed

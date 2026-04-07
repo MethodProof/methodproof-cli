@@ -36,9 +36,12 @@ _DEFAULTS: dict[str, Any] = {
     "research_consent": False,
     "journal_mode": False,
     "journal_credits": 2,
+    "e2e_mode": False,
+    "e2e_fingerprint": "",
     "auto_update": False,
     "account_id": "",
     "last_auth_at": 0,
+    "local_ai_ports": [],  # user-configured localhost ports for local LLM capture
     "publish_redact": {
         "command_output": True,
         "ai_prompts": True,

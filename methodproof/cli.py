@@ -408,6 +408,23 @@ def cmd_init(args: argparse.Namespace) -> None:
     else:
         print("AI hooks: skipped (ai_prompts and ai_responses disabled)")
 
+    # Local AI ports — capture traffic from local LLM servers
+    if ai_enabled and not cfg.get("local_ai_ports_offered"):
+        answer = input("Run any local AI models (Ollama, LM Studio, vLLM, etc.)? [y/N]: ").strip().lower()
+        cfg["local_ai_ports_offered"] = True
+        if answer == "y":
+            raw = input("Enter ports (comma-separated, e.g. 8080,5000,7860): ").strip()
+            ports = [int(p.strip()) for p in raw.split(",") if p.strip().isdigit()]
+            cfg["local_ai_ports"] = ports
+            if ports:
+                print(f"Local AI ports: {', '.join(str(p) for p in ports)} (proxy will decode these)")
+            else:
+                print("Local AI ports: none added")
+        else:
+            cfg["local_ai_ports"] = []
+            print("Local AI ports: skipped (built-in: Ollama 11434, Jan 1234)")
+        config.save(cfg)
+
     # Signing keypair for attestation
     from methodproof.integrity import has_keypair
     if not has_keypair():
@@ -845,28 +862,54 @@ def _is_daemon_alive() -> bool:
         return False
 
 
+def _log_step(msg: str, verbose: bool = False) -> None:
+    """Print a step-by-step progress line. Always shown."""
+    print(f"  → {msg}")
+
+
+def _log_debug(msg: str, **kw: object) -> None:
+    """Print structured debug line (--verbose only). Writes to stderr."""
+    import json as _json
+    entry = {"ts": time.time(), "level": "debug", "event": msg, **kw}
+    sys.stderr.write(_json.dumps(entry, default=str) + "\n")
+
+
 def cmd_start(args: argparse.Namespace) -> None:
+    verbose = getattr(args, "verbose", False)
+    streaming = getattr(args, "streaming", False)
+
+    _log_step("Loading config")
     cfg = config.load()
+    if verbose:
+        _log_debug("config.loaded", api_url=cfg.get("api_url"), account_id=cfg.get("account_id", "")[:8],
+                    active_session=cfg.get("active_session"), journal=cfg.get("journal_mode"))
+
     if cfg.get("auto_update"):
+        _log_step("Checking for updates")
         _auto_update()
+
     if cfg.get("active_session"):
         if _is_daemon_alive():
             print(f"Session active: {cfg['active_session'][:8]}")
             print("Run `methodproof stop` first.")
             sys.exit(1)
-        # Daemon is dead — clean up the stale session
         stale_sid = cfg["active_session"]
+        _log_step(f"Cleaning stale session {stale_sid[:8]}")
         store.complete_session(stale_sid)
         graph.build(stale_sid)
         PIDFILE.unlink(missing_ok=True)
         cfg["active_session"] = None
         config.save(cfg)
-        print(f"Cleaned up stale session {stale_sid[:8]} (daemon was not running).")
+
+    _log_step("Checking hooks")
     if not hook.is_installed():
-        print("Run `methodproof init` first.")
+        print("ERROR: Run `methodproof init` first.")
         sys.exit(1)
 
+    _log_step("Authenticating")
     account_id = _require_auth(cfg)
+    if verbose:
+        _log_debug("auth.ok", account_id=account_id[:8] if account_id else "none")
 
     # Check for new consent categories before recording
     capture = cfg.get("capture", {})
@@ -878,6 +921,7 @@ def cmd_start(args: argparse.Namespace) -> None:
         config.save(cfg)
         print()
 
+    _log_step("Creating session")
     sid = uuid.uuid4().hex
     watch_dir = os.path.abspath(args.dir or ".")
     repo_url = args.repo or repos.detect_repo(watch_dir)
@@ -885,7 +929,6 @@ def cmd_start(args: argparse.Namespace) -> None:
     visibility = "public" if args.public else "private"
     from methodproof.binding import compute_binding, compute_device_id
     device_id = compute_device_id()
-    # Compute session binding if master key is available
     binding = ""
     if cfg.get("master_key_fingerprint") and account_id:
         from methodproof.keychain import load_secret
@@ -895,38 +938,49 @@ def cmd_start(args: argparse.Namespace) -> None:
             master = derive_master(entropy)
             bind_key = derive_bind_key(master, account_id)
             binding = compute_binding(bind_key, sid, account_id, device_id, time.time())
+            if verbose:
+                _log_debug("binding.computed", device_id=device_id[:8])
     store.create_session(sid, watch_dir, repo_url, json.dumps(tags), visibility,
                          account_id, binding, device_id)
     cfg["active_session"] = sid
     config.save(cfg)
     PIDFILE.write_text(str(os.getpid()))
+    if verbose:
+        _log_debug("session.created", sid=sid[:8], watch_dir=watch_dir, visibility=visibility,
+                    device_id=device_id[:8], bound=bool(binding))
 
-    # Temporal anchor — server-signed timestamp (best-effort, skip if offline)
+    # Temporal anchor
     if cfg.get("token"):
+        _log_step("Requesting temporal anchor")
         try:
             from methodproof.sync import _request
             anchor = _request("POST", f"/sessions/{sid}/anchor", cfg["api_url"], cfg["token"])
             store.update_anchor(sid, anchor["anchor_ts"], anchor["signature"])
+            if verbose:
+                _log_debug("anchor.ok", anchor_ts=anchor["anchor_ts"])
         except Exception as exc:
-            print(f"Anchor: skipped ({exc})")
+            _log_step(f"Anchor: skipped ({exc})")
 
     from methodproof.agents import base
-    live_ok = False
     capture = cfg.get("capture", {})
 
+    # Live streaming
     live_url = ""
     want_live = args.live or getattr(args, "live_public", False)
     live_visibility = "public" if getattr(args, "live_public", False) else "private"
     if want_live:
+        _log_step("Connecting live stream")
         if not cfg.get("token"):
             print("Live mode requires login. Run `methodproof login` first.")
             sys.exit(1)
-        # Create remote session first
         from methodproof.sync import _request
-        result = _request("POST", "/personal/sessions", cfg["api_url"], cfg["token"])
+        session_body: dict = {}
+        if cfg.get("e2e_fingerprint") and (getattr(args, "e2e", False) or cfg.get("e2e_mode")):
+            session_body["e2e_key_fingerprint"] = cfg["e2e_fingerprint"]
+        result = _request("POST", "/personal/sessions", cfg["api_url"], cfg["token"],
+                          session_body or None)
         remote_id = result["session_id"]
         store.mark_synced(sid, remote_id)
-        # Connect live WebSocket
         from methodproof import live as live_mod
         live_url = live_mod.start(cfg["api_url"], cfg["token"], remote_id, capture, live_visibility) or ""
         if not live_url:
@@ -939,7 +993,7 @@ def cmd_start(args: argparse.Namespace) -> None:
             print(f"Live (public): {live_url}")
             print("  Anyone with this link can watch your session build in real time.")
 
-    # Journal mode — per-session override or persistent config
+    # Journal mode
     if getattr(args, "journal", False):
         cfg["journal_mode"] = True
         credits = cfg.get("journal_credits", 0)
@@ -949,6 +1003,18 @@ def cmd_start(args: argparse.Namespace) -> None:
         else:
             print("Journal mode ON for this session (full content capture).")
         config.save(cfg)
+
+    # E2E mode
+    want_e2e = getattr(args, "e2e", False) or (cfg.get("e2e_mode") and not getattr(args, "no_e2e", False))
+    if want_e2e:
+        fp = cfg.get("e2e_fingerprint")
+        if not fp:
+            print("E2E requires key setup. Run `methodproof e2e on` first.")
+            sys.exit(1)
+        cfg["_session_e2e"] = True
+        config.save(cfg)
+        print("E2E mode ON for this session (content encrypted with your key).")
+        print("  Narration unavailable. Release later with: mp e2e release <session-id>")
 
     # Save live_url for daemon subprocess to pick up
     if live_url:
@@ -966,25 +1032,35 @@ def cmd_start(args: argparse.Namespace) -> None:
         print(f"Bridge:    http://localhost:9877")
     if live_url:
         print(f"Live:      {live_url}")
+    if verbose:
+        print(f"Mode:      verbose (debug → daemon.log)")
+    if streaming:
+        print(f"Mode:      streaming (blocking, events → stdout)")
 
-    # Daemonize: spawn a subprocess (safe on macOS — avoids CoreFoundation segfault from os.fork)
+    # --streaming: blocking foreground mode with real-time event output
+    if streaming:
+        _run_foreground(sid, watch_dir, cfg, capture, live_url, verbose=True, streaming=True)
+        return
+
+    # Daemonize (macOS/Linux) — pass --verbose to daemon if set
     if sys.platform != "win32":
         import subprocess as _sp
         daemon_log = config.DIR / "daemon.log"
         log_fh = open(daemon_log, "a")
-        proc = _sp.Popen(
-            [sys.executable, "-m", "methodproof._daemon", sid, watch_dir],
-            start_new_session=True,
-            stdout=log_fh, stderr=log_fh, stdin=_sp.DEVNULL,
-        )
+        cmd = [sys.executable, "-m", "methodproof._daemon", sid, watch_dir]
+        if verbose:
+            cmd.append("--verbose")
+        _log_step(f"Spawning daemon (log: {daemon_log})")
+        proc = _sp.Popen(cmd, start_new_session=True, stdout=log_fh, stderr=log_fh, stdin=_sp.DEVNULL)
         PIDFILE.write_text(str(proc.pid))
-        # Verify daemon is alive after brief startup
+        if verbose:
+            _log_debug("daemon.spawned", pid=proc.pid, cmd=cmd)
         time.sleep(1)
         if proc.poll() is not None:
             print(f"ERROR: Daemon exited immediately (code {proc.returncode}). Check {daemon_log}")
             PIDFILE.unlink(missing_ok=True)
             sys.exit(1)
-        # Check extension auto-discovery (extension polls every ~6s)
+        _log_step(f"Daemon alive (pid {proc.pid})")
         if capture.get("browser", True):
             import urllib.request as _ur
             time.sleep(7)
@@ -1001,9 +1077,16 @@ def cmd_start(args: argparse.Namespace) -> None:
         return
 
     # Windows: foreground mode (no subprocess daemonization)
+    _run_foreground(sid, watch_dir, cfg, capture, live_url, verbose=verbose, streaming=False)
+
+
+def _run_foreground(sid: str, watch_dir: str, cfg: dict, capture: dict,
+                    live_url: str, verbose: bool, streaming: bool) -> None:
+    """Run capture agents in the foreground (blocking). Used by --streaming and Windows."""
     from methodproof.agents import base as _base
-    _base.init(sid, live=bool(live_url))
+    _base.init(sid, live=bool(live_url), verbose=verbose, streaming=streaming)
     if capture.get("environment_analysis", True):
+        _log_step("Scanning environment")
         try:
             from methodproof.analysis import scan_environment
             env_profile = scan_environment(watch_dir)
@@ -1020,19 +1103,31 @@ def cmd_start(args: argparse.Namespace) -> None:
     if files_enabled:
         from methodproof.agents import watcher
         threads.append(threading.Thread(target=watcher.start, args=(watch_dir, stop_event), daemon=True))
+        _log_step("Agent: watcher")
     if capture.get("terminal_commands", True) or capture.get("test_results", True):
         from methodproof.agents import terminal
         threads.append(threading.Thread(target=terminal.start, args=(stop_event,), daemon=True))
+        _log_step("Agent: terminal")
     if capture.get("browser", True):
         from methodproof import bridge
+        e2e_key_hex = ""
+        if cfg.get("_session_e2e") and cfg.get("account_id"):
+            from methodproof.keychain import load_secret
+            _raw = load_secret(f"e2e:{cfg['account_id']}")
+            if _raw:
+                e2e_key_hex = _raw.hex()
+        else:
+            e2e_key_hex = cfg.get("e2e_key", "")
         threads.append(threading.Thread(target=bridge.start, args=(
             sid, stop_event, 9877,
-            cfg.get("token", ""), cfg.get("api_url", ""), cfg.get("e2e_key", ""),
+            cfg.get("token", ""), cfg.get("api_url", ""), e2e_key_hex,
             cfg.get("journal_mode", False),
         ), daemon=True))
+        _log_step("Agent: bridge")
     if capture.get("music", True):
         from methodproof.agents import music
         threads.append(threading.Thread(target=music.start, args=(stop_event,), daemon=True))
+        _log_step("Agent: music")
 
     def _shutdown(sig: int, frame: object) -> None:
         stop_event.set()
@@ -1054,10 +1149,14 @@ def cmd_start(args: argparse.Namespace) -> None:
         PIDFILE.unlink(missing_ok=True)
         sys.exit(0)
 
+    _log_step(f"Starting {len(threads)} agent(s)")
     for t in threads:
         t.start()
     signal.signal(signal.SIGINT, _shutdown)
-    print("Press Ctrl+C or run `mp stop` to finish.")
+    if streaming:
+        print("\n  Streaming events (Ctrl+C to stop):\n")
+    else:
+        print("Press Ctrl+C or run `mp stop` to finish.")
     stopfile = config.DIR / "methodproof.stop"
     while not stop_event.is_set():
         if stopfile.exists():
@@ -1583,6 +1682,10 @@ def main() -> None:
     s.add_argument("--live", action="store_true", help="Stream graph live to your private profile")
     s.add_argument("--live-public", action="store_true", help="Stream graph live — visible to anyone with the link")
     s.add_argument("--journal", action="store_true", help="Journal mode — full content capture (2 free credits, then Pro)")
+    s.add_argument("--e2e", action="store_true", help="E2E encryption — content encrypted with your personal key")
+    s.add_argument("--no-e2e", action="store_true", help="Disable E2E for this session (overrides config)")
+    s.add_argument("--verbose", "-v", action="store_true", help="Debug logging at each step (still daemonizes)")
+    s.add_argument("--streaming", action="store_true", help="Blocking foreground — stream every captured event to stdout")
     sub.add_parser("stop", help="Stop recording")
     v = sub.add_parser("view", help="Inspect captured session data")
     v.add_argument("session_id", nargs="?")
@@ -1626,6 +1729,14 @@ def main() -> None:
     jr_sub.add_parser("on", help="Enable journal mode (persists full content)")
     jr_sub.add_parser("off", help="Disable journal mode (structural only)")
     jr_sub.add_parser("status", help="Show journal mode status")
+    e2e_p = sub.add_parser("e2e", help="E2E encryption — personal key management")
+    e2e_sub = e2e_p.add_subparsers(dest="e2e_cmd")
+    e2e_sub.add_parser("on", help="Enable E2E mode (generates key on first use)")
+    e2e_sub.add_parser("off", help="Disable E2E mode (key stays in keychain)")
+    e2e_sub.add_parser("status", help="Show E2E mode status")
+    e2e_sub.add_parser("recover", help="Recover key from passphrase")
+    e2e_rel = e2e_sub.add_parser("release", help="Release a session from E2E encryption")
+    e2e_rel.add_argument("session_id", help="Session ID to release")
     sub.add_parser("intro", help="Show the MethodProof intro")
     sub.add_parser("help", help="Show command reference")
     sub.add_parser("mcp-serve", help="Run MCP server (used by Claude Code)")
@@ -1645,6 +1756,7 @@ def main() -> None:
         "update": cmd_update, "lock": cmd_lock, "reset": cmd_reset, "uninstall": cmd_uninstall,
         "extension": cmd_extension,
         "journal": cmd_journal,
+        "e2e": lambda a: __import__("methodproof.e2e", fromlist=["cmd_e2e"]).cmd_e2e(a),
         "intro": lambda _: _print_intro(),
         "help": lambda _: _print_commands(),
         "mcp-serve": cmd_mcp_serve,
