@@ -21,6 +21,8 @@ _MAX_RETRIES = 3
 _prev_hash = "genesis"
 _account_id = ""
 _journal_mode = False
+_verbose = False
+_streaming = False
 
 # Maps event types to the capture category that gates them
 _EVENT_GATES: dict[str, str] = {
@@ -78,8 +80,15 @@ _FIELD_GATES: dict[str, list[tuple[str, str]]] = {
 
 
 def _load_encryption_key(cfg: dict) -> bytes | None:
-    """Load db_key from keychain (preferred) or legacy e2e_key config."""
+    """Load encryption key: individual E2E > db_key from keychain > legacy e2e_key."""
     account_id = cfg.get("account_id", "")
+    # Individual E2E key — highest priority when session is E2E
+    if account_id and cfg.get("e2e_fingerprint") and cfg.get("_session_e2e"):
+        from methodproof.keychain import load_secret
+        e2e_key = load_secret(f"e2e:{account_id}")
+        if e2e_key:
+            return e2e_key
+    # Local db_key (for SQLite encryption)
     if account_id and cfg.get("master_key_fingerprint"):
         from methodproof.keychain import load_secret
         from methodproof.kdf import derive_master, derive_db_key
@@ -91,11 +100,13 @@ def _load_encryption_key(cfg: dict) -> bytes | None:
     return bytes.fromhex(raw) if raw else None
 
 
-def init(session_id: str, live: bool = False) -> None:
-    global _session_id, _initialized, _e2e_key, _capture, _live_mode, _prev_hash, _journal_mode, _account_id
+def init(session_id: str, live: bool = False, verbose: bool = False, streaming: bool = False) -> None:
+    global _session_id, _initialized, _e2e_key, _capture, _live_mode, _prev_hash, _journal_mode, _account_id, _verbose, _streaming
     _session_id = session_id
     _initialized = True
     _live_mode = live
+    _verbose = verbose
+    _streaming = streaming
     _prev_hash = "genesis"
     from methodproof import config
     cfg = config.load()
@@ -103,6 +114,10 @@ def init(session_id: str, live: bool = False) -> None:
     _capture = cfg.get("capture", {})
     _journal_mode = cfg.get("journal_mode", False)
     _account_id = cfg.get("account_id", "")
+    if _verbose or _streaming:
+        active = [k for k, v in _capture.items() if v]
+        log("info", "base.init", encryption=bool(_e2e_key), journal=_journal_mode,
+            live=_live_mode, capture=active)
 
 
 def log(level: str, event: str, **kw: object) -> None:
@@ -153,6 +168,10 @@ def emit(event_type: str, metadata: dict[str, Any]) -> None:
         _buffer.append(entry)
         if len(_buffer) >= _FLUSH_SIZE:
             _flush_locked()
+    if _verbose:
+        log("debug", "emit.buffered", type=event_type, buffer=len(_buffer))
+    if _streaming:
+        _stream_event(entry)
     if _live_mode:
         from methodproof import live as live_mod
         live_mod.send(entry)
@@ -168,15 +187,55 @@ def _flush_locked() -> None:
         return
     batch = list(_buffer)
     hashes = [(e["id"], e.pop("_chain_hash")) for e in batch if "_chain_hash" in e]
+    if _verbose or _streaming:
+        types = [e["type"] for e in batch]
+        log("info", "flush.start", count=len(batch), types=types)
     for attempt in range(_MAX_RETRIES):
         try:
             store.insert_events(_session_id, batch)
             if hashes:
                 store.insert_event_hashes(hashes)
+            if _verbose or _streaming:
+                log("info", "flush.ok", count=len(batch))
             _buffer.clear()
             return
         except Exception as exc:
             log("warning", "flush.retry", attempt=attempt + 1, error=str(exc))
             time.sleep(0.1 * (attempt + 1))
-    # Final attempt failed — keep events in buffer for next flush cycle
     log("error", "flush.failed", count=len(batch), retries=_MAX_RETRIES)
+
+
+def _stream_event(entry: dict[str, Any]) -> None:
+    """Print a human-readable event line to stdout for --streaming mode."""
+    ts = time.strftime("%H:%M:%S", time.localtime(entry["timestamp"]))
+    etype = entry["type"]
+    meta = entry.get("metadata", {})
+    # Build a compact summary per event type
+    detail = ""
+    if etype == "file_edit":
+        detail = f'{meta.get("path", "?")} +{meta.get("lines_added", 0)}-{meta.get("lines_removed", 0)}'
+    elif etype == "file_create":
+        detail = f'{meta.get("path", "?")} ({meta.get("size", 0)}B)'
+    elif etype == "file_delete":
+        detail = meta.get("path", "?")
+    elif etype == "terminal_cmd":
+        detail = f'{meta.get("command", "?")[:60]} → exit {meta.get("exit_code", "?")}'
+    elif etype == "test_run":
+        detail = f'{meta.get("framework", "?")} {meta.get("passed", 0)}✓ {meta.get("failed", 0)}✗'
+    elif etype == "git_commit":
+        detail = f'{meta.get("hash", "?")} {meta.get("message", "")[:50]}'
+    elif etype in ("llm_prompt", "agent_prompt", "user_prompt"):
+        detail = f'len={meta.get("prompt_length", meta.get("message_length", "?"))}'
+    elif etype in ("llm_completion", "agent_completion"):
+        detail = f'len={meta.get("response_length", "?")}'
+    elif etype == "music_playing":
+        detail = f'{meta.get("artist", "?")} — {meta.get("track", "?")}'
+    elif etype.startswith("browser_"):
+        detail = meta.get("url", meta.get("query", ""))[:60]
+    elif etype == "environment_profile":
+        detail = f'{meta.get("tool_count", "?")} tools'
+    else:
+        keys = list(meta.keys())[:4]
+        detail = ", ".join(f"{k}={meta[k]}" for k in keys) if keys else ""
+    sys.stdout.write(f"  [{ts}] {etype:30s} {detail}\n")
+    sys.stdout.flush()

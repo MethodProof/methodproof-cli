@@ -13,7 +13,35 @@ from watchdog.observers import Observer
 from methodproof.agents import base
 
 IGNORE_PATTERNS = re.compile(
-    r"(__pycache__|\.pyc|\.git/|node_modules|\.DS_Store|\.swp|~$)"
+    # Version control
+    r"(\.git/|\.hg/|\.svn/"
+    # OS / editor artifacts
+    r"|\.DS_Store|Thumbs\.db|\.swp|\.swo|~$|\.idea/|\.vscode/"
+    # Python
+    r"|__pycache__|\.pyc|\.pyo|\.egg-info/|\.eggs/|\.tox/"
+    r"|\.venv/|venv/|\.env/|env/|\.mypy_cache/|\.pytest_cache/|\.ruff_cache/"
+    r"|\.coverage|htmlcov/|\.nox/"
+    # JavaScript / TypeScript
+    r"|node_modules/|\.next/|\.nuxt/|\.expo/|\.turbo/|\.parcel-cache/"
+    r"|\.svelte-kit/|\.angular/|\.cache/"
+    # Rust
+    r"|/target/|\.cargo/"
+    # Go
+    r"|vendor/"
+    # Java / Kotlin / JVM
+    r"|\.gradle/|\.m2/|/out/"
+    # Ruby
+    r"|\.bundle/|\.gem/"
+    # PHP
+    r"|/vendor/|\.phpunit/"
+    # .NET / C#
+    r"|/bin/|/obj/|\.nuget/"
+    # Swift / Xcode
+    r"|\.build/|DerivedData/|Pods/"
+    # Build output / artifacts
+    r"|dist/|build/|\.output/"
+    # Logs and locks
+    r"|\.lock$|\.log$)"
 )
 
 

@@ -18,6 +18,7 @@ PIDFILE = config.DIR / "methodproof.pid"
 def main() -> None:
     sid = sys.argv[1]
     watch_dir = sys.argv[2]
+    verbose = "--verbose" in sys.argv
 
     cfg = config.load()
     capture = cfg.get("capture", {})
@@ -28,10 +29,15 @@ def main() -> None:
         del cfg["_live_url"]
         config.save(cfg)
 
-    base.init(sid, live=bool(live_url))
+    base.init(sid, live=bool(live_url), verbose=verbose)
 
-    # Environment profile (was done pre-fork in old code, now done in daemon)
+    if verbose:
+        active = [k for k, v in capture.items() if v]
+        base.log("info", "daemon.config", capture=active, live=bool(live_url),
+                 journal=cfg.get("journal_mode", False))
+
     if capture.get("environment_analysis", True):
+        base.log("info", "daemon.agent.environment_scan") if verbose else None
         try:
             from methodproof.analysis import scan_environment
             env_profile = scan_environment(watch_dir)
@@ -52,12 +58,16 @@ def main() -> None:
         threads.append(threading.Thread(
             target=watcher.start, args=(watch_dir, stop_event), daemon=True,
         ))
+        if verbose:
+            base.log("info", "daemon.agent.watcher", dir=watch_dir)
 
     if capture.get("terminal_commands", True) or capture.get("test_results", True):
         from methodproof.agents import terminal
         threads.append(threading.Thread(
             target=terminal.start, args=(stop_event,), daemon=True,
         ))
+        if verbose:
+            base.log("info", "daemon.agent.terminal", log=str(config.CMD_LOG))
 
     if capture.get("browser", True):
         from methodproof import bridge
@@ -68,12 +78,16 @@ def main() -> None:
                   cfg.get("journal_mode", False)),
             daemon=True,
         ))
+        if verbose:
+            base.log("info", "daemon.agent.bridge", port=9877)
 
     if capture.get("music", True):
         from methodproof.agents import music
         threads.append(threading.Thread(
             target=music.start, args=(stop_event,), daemon=True,
         ))
+        if verbose:
+            base.log("info", "daemon.agent.music")
 
     def _shutdown(sig_num: int, frame: object) -> None:
         stop_event.set()

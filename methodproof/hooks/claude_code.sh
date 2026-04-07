@@ -3,7 +3,9 @@
 # Receives JSON on stdin. Posts to local bridge. Fails silently.
 # Must complete in <1s to avoid blocking Claude Code.
 
-# Require jq — without it, fall back to a minimal Python parser
+# Skip if no session is running (no pidfile = no daemon = no bridge)
+[ -f "${HOME}/.methodproof/methodproof.pid" ] || exit 0
+
 INPUT=$(cat)
 
 if command -v jq >/dev/null 2>&1; then
