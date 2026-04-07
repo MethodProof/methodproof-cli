@@ -79,7 +79,6 @@ JOURNAL_CONTENT_FIELDS: list[tuple[str, str]] = [
     # AI prompts — full prompt text
     ("llm_prompt", "prompt_text"),
     ("agent_prompt", "prompt_preview"),
-    ("user_prompt", "prompt_preview"),
     # AI responses — full completion text
     ("llm_completion", "response_text"),
     ("agent_completion", "response_preview"),
@@ -105,8 +104,6 @@ JOURNAL_CONTENT_FIELDS: list[tuple[str, str]] = [
     ("browser_copy", "text_snippet"),
     ("browser_ai_chat", "detected_input"),
     ("browser_ai_chat", "url"),
-    # Inline completions — provider detail
-    ("inline_completion_accepted", "text_length"),
     # Tasks — subject reveals intent
     ("task_created", "subject"),
 ]
