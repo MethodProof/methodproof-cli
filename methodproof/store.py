@@ -4,6 +4,7 @@ import json
 import sqlite3
 import time
 import uuid
+import zlib
 from typing import Any
 
 from methodproof import config
@@ -113,7 +114,28 @@ def _migrate() -> None:
         db.execute("DELETE FROM action_artifacts")
         db.execute("DELETE FROM artifacts WHERE rowid NOT IN (SELECT MIN(rowid) FROM artifacts GROUP BY path)")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_path ON artifacts(path)")
+    # Compress legacy uncompressed metadata (TEXT → zlib BLOB)
+    _migrate_compress_metadata(db)
     db.commit()
+
+
+def _migrate_compress_metadata(db: sqlite3.Connection) -> None:
+    """Silently compress any uncompressed TEXT metadata rows to zlib BLOBs."""
+    rows = db.execute("SELECT id, metadata FROM events WHERE typeof(metadata) = 'text'").fetchall()
+    if not rows:
+        return
+    batch, skipped = [], 0
+    for r in rows:
+        try:
+            compressed = zlib.compress(r["metadata"].encode())
+            batch.append((compressed, r["id"]))
+        except Exception:
+            skipped += 1
+    if batch:
+        db.executemany("UPDATE events SET metadata = ? WHERE id = ?", batch)
+    if skipped:
+        import sys
+        sys.stderr.write(f"[methodproof] migration: compressed {len(batch)} events, skipped {skipped}\n")
 
 
 def create_session(
@@ -142,14 +164,27 @@ def complete_session(session_id: str) -> None:
     db.commit()
 
 
+def _compress_meta(meta: dict[str, Any]) -> bytes:
+    return zlib.compress(json.dumps(meta, default=str).encode())
+
+
+def _decompress_meta(raw: bytes | str) -> dict[str, Any]:
+    if isinstance(raw, str):
+        return json.loads(raw)
+    try:
+        return json.loads(zlib.decompress(raw))
+    except zlib.error:
+        return json.loads(raw)
+
+
 def insert_events(session_id: str, events: list[dict[str, Any]]) -> None:
     db = _db()
     rows = []
     for e in events:
         try:
-            meta = json.dumps(e.get("metadata", {}), default=str)
+            meta = _compress_meta(e.get("metadata", {}))
         except (TypeError, ValueError):
-            meta = "{}"
+            meta = _compress_meta({})
         rows.append((
             e["id"], session_id, e["type"], e["timestamp"],
             e.get("duration_ms", 0), meta,
@@ -176,7 +211,12 @@ def get_events(session_id: str) -> list[dict[str, Any]]:
         "SELECT * FROM events WHERE session_id = ? ORDER BY timestamp",
         (session_id,),
     ).fetchall()
-    return [dict(r) for r in rows]
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["metadata"] = json.dumps(_decompress_meta(d["metadata"]))
+        result.append(d)
+    return result
 
 
 def get_graph(session_id: str) -> dict[str, Any]:
@@ -184,7 +224,7 @@ def get_graph(session_id: str) -> dict[str, Any]:
     events = get_events(session_id)
     nodes = [{"id": e["id"], "type": "Action", "label": e["type"],
               "properties": {"timestamp": e["timestamp"], "duration_ms": e["duration_ms"],
-                             "metadata": json.loads(e["metadata"])}}
+                             "metadata": _decompress_meta(e["metadata"])}}
              for e in events]
 
     edges = []

@@ -1,5 +1,6 @@
 """Push local sessions to the MethodProof platform."""
 
+import gzip
 import json
 import urllib.error
 import urllib.request
@@ -30,8 +31,13 @@ def _raw_request(
     method: str, url: str, token: str,
     body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    data = json.dumps(body).encode() if body else None
+    if body is not None:
+        data = gzip.compress(json.dumps(body).encode())
+    else:
+        data = None
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+    if data is not None:
+        headers["Content-Encoding"] = "gzip"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read())

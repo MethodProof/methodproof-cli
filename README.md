@@ -45,7 +45,7 @@ methodproof view      # explore your session in the browser
 - **Environment profiling** — structural analysis of your AI dev environment (instruction files, tool counts, MCP servers) captured at session start
 - **Outcome metrics** — first-shot apply rate, follow-up sequences, phase transitions computed at session end
 - **Granular consent** — 10 standard capture categories + 1 premium, each independently toggled. Nothing records without your opt-in
-- **Local-first** — SQLite database at `~/.methodproof/`, `chmod 600`. No network calls unless you choose
+- **Local-first** — SQLite database at `~/.methodproof/`, `chmod 600`, zlib-compressed metadata. No network calls unless you choose
 - **Live streaming** — `methodproof start --live` streams events to the platform in real-time over WebSocket
 - **Integrity verification** — hash-chained events + Ed25519 attestation prove sessions haven't been tampered with
 - **E2E encryption** — optional company-held AES-256-GCM encryption the platform cannot decrypt
@@ -84,7 +84,7 @@ flowchart TB
             CHAIN --> BUF["Batched Flush"]
         end
 
-        BUF --> DB[("SQLite WAL")]
+        BUF -->|"zlib compress"| DB[("SQLite WAL")]
         BUF -.->|"--live"| WS["WebSocket Stream"]
 
         subgraph KEYS["Key Vault"]
@@ -100,7 +100,7 @@ flowchart TB
 
     subgraph PUSH["PUSH PROTOCOL"]
         direction TB
-        DB --> BATCH["Batched Upload"]
+        DB -->|"gzip"| BATCH["Batched Upload"]
         BATCH --> BIND["Session Binding: HMAC over session metadata"]
         BIND --> SIGN["Ed25519 Sign: session summary"]
     end
@@ -138,18 +138,24 @@ flowchart TB
 | Command | What it does |
 |---------|-------------|
 | `init` | Interactive consent selector, install hooks, create data directory |
-| `start [--dir .] [--tags t1,t2] [--public] [--live]` | Start recording |
+| `start [--dir .] [--tags t1,t2] [--public] [--live] [--journal] [--e2e]` | Start recording |
 | `stop` | Stop recording, build process graph |
 | `view [session_id]` | Open session graph in browser |
 | `log` | List sessions with sync status, visibility, tags |
-| `login` | Authenticate with the platform |
-| `push [session_id]` | Upload session |
-| `publish [session_id]` | Set public + push |
+| `login [--api-url URL]` | Authenticate with the platform |
+| `push [session_id] [--local]` | Upload session (`--local` targets localhost:8000) |
+| `publish [session_id] [--anonymous]` | Set public + push (redaction applied) |
 | `tag <session_id> <tags>` | Add tags |
 | `delete <session_id> [-f]` | Delete session and all its data |
-| `consent` | Change capture categories |
+| `consent` | Change capture, research, and redaction settings |
 | `review` | Inspect session data before pushing |
-| `update` | Check for and install CLI updates |
+| `journal on/off/status` | Toggle journal mode (full content capture) |
+| `e2e on/off/status/recover/release` | Manage personal E2E encryption keys |
+| `extension pair/status/install` | Browser extension pairing |
+| `proxy start/stop/status/cert` | Local AI API proxy (deep capture) |
+| `update [--auto/--no-auto]` | Check for and install CLI updates |
+| `lock [--purge]` | Destroy local encryption key (recoverable) |
+| `uninstall [--keep-sessions]` | Remove all hooks, data, and config |
 
 ## Privacy & Consent
 
@@ -291,6 +297,25 @@ methodproof start
 **Excluded patterns:** `__pycache__`, `.pyc`, `.git/`, `node_modules`, `.DS_Store`, `.swp`, temp files ending in `~`
 
 **Git commits** are detected automatically — only commits in a git repo rooted at (or above) the watch directory are captured.
+
+## Local Development
+
+Push sessions to a local API for testing:
+
+```bash
+# One-time: login to your local API
+mp login --api-url http://localhost:8000
+
+# Push with --local flag (overrides stored URL for this command)
+mp push --local
+
+# Or set the env var (works with any command)
+METHODPROOF_API_URL=http://localhost:8000 mp push
+```
+
+`--local` is a shorthand for `http://localhost:8000`. It does not clobber your production token — it only overrides the API URL for that invocation.
+
+You still need a valid JWT from the local API. Run `mp login --api-url http://localhost:8000` once to authenticate against your local platform.
 
 ## Data Directory
 

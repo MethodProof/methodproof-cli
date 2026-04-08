@@ -134,10 +134,20 @@ def secure_file(path: Path) -> None:
         path.chmod(0o600)
 
 
-def load() -> dict[str, Any]:
+LOCAL_API_URL = "http://localhost:8000"
+
+
+def load(local: bool = False) -> dict[str, Any]:
     if not CONFIG.exists():
-        return dict(_DEFAULTS)
-    return {**_DEFAULTS, **json.loads(CONFIG.read_text())}
+        cfg = dict(_DEFAULTS)
+    else:
+        cfg = {**_DEFAULTS, **json.loads(CONFIG.read_text())}
+    env_url = os.environ.get("METHODPROOF_API_URL")
+    if local:
+        cfg["api_url"] = LOCAL_API_URL
+    elif env_url:
+        cfg["api_url"] = env_url
+    return cfg
 
 
 def save(cfg: dict[str, Any]) -> None:

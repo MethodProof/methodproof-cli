@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.7.5] — 2026-04-08
+
+### Added
+- **Metadata compression** — event metadata stored as zlib-compressed BLOBs in SQLite (~80% storage reduction for journal-mode sessions). Existing uncompressed rows are silently migrated on next startup.
+- **Gzip transfer encoding** — `mp push` sends gzip-compressed request bodies to the platform. Reduces upload bandwidth ~70% for large batches.
+
 ## [0.7.1] — 2026-04-07
 
 ### Fixed
