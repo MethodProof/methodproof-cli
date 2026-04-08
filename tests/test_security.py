@@ -106,10 +106,12 @@ def test_bip39_known_vector():
 
 
 def test_bip39_bad_checksum():
-    phrase = entropy_to_phrase(os.urandom(16))
+    # Use fixed entropy so the checksum corruption is deterministic
+    phrase = entropy_to_phrase(b"\x00" * 16)
     words = phrase.split()
-    words[-1] = words[0]  # corrupt checksum
-    with pytest.raises(ValueError, match="checksum|Unknown"):
+    # Flip the last word to a word that changes the checksum bits
+    words[-1] = "zone"
+    with pytest.raises(ValueError, match="checksum"):
         phrase_to_entropy(" ".join(words))
 
 
