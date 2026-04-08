@@ -662,13 +662,15 @@ def cmd_reset(args: argparse.Namespace) -> None:
         if answer not in ("y", "yes"):
             print("  Cancelled.")
             return
-    for key in ("token", "refresh_token", "email", "e2e_key"):
+    for key in ("token", "refresh_token", "email", "e2e_key",
+                "account_id", "last_auth_at", "master_key_fingerprint"):
         cfg[key] = config._DEFAULTS[key]
     for key in ("capture", "research_consent", "publish_redact", "consent_acknowledged",
                 "journal_mode", "journal_credits", "auto_update", "auto_update_offered"):
         cfg[key] = config._DEFAULTS.get(key)
     config.save(cfg)
     cleared = ["login token", "refresh token", "email", "e2e key",
+               "account id", "master key fingerprint",
                "capture consent", "research consent", "redaction defaults",
                "journal mode", "auto-update"]
     print("  Cleared:")
@@ -1259,7 +1261,7 @@ def cmd_logout(args: argparse.Namespace) -> None:
         return
     old_email = cfg.get("email", "")
     old_account = cfg.get("account_id", "")[:8]
-    for key in ("token", "refresh_token", "email", "account_id", "last_auth_at"):
+    for key in ("token", "refresh_token", "email", "account_id", "last_auth_at", "master_key_fingerprint"):
         cfg[key] = config._DEFAULTS.get(key, "")
     config.save(cfg)
     label = old_email or old_account or "account"
@@ -1310,9 +1312,11 @@ def cmd_login(args: argparse.Namespace) -> None:
                 claims = _decode_jwt_claims(poll["token"])
                 cfg["account_id"] = claims.get("user_id", "")
                 cfg["last_auth_at"] = time.time()
+                cfg["master_key_fingerprint"] = ""  # clear stale fingerprint from previous account
                 config.save(cfg)
                 print(" done.\n")
-                _setup_master_key(cfg)
+                if not getattr(args, "no_key", False):
+                    _setup_master_key(cfg)
                 from methodproof.sync import sync_research_consent
                 sync_research_consent(cfg["token"], cfg["api_url"])
                 print("Logged in. Run `methodproof push` to upload sessions.")
@@ -1736,6 +1740,7 @@ def main() -> None:
     l = sub.add_parser("login", help="Connect to platform")
     l.add_argument("--api-url")
     l.add_argument("--force", "-f", action="store_true", help="Skip switch-account prompt")
+    l.add_argument("--no-key", action="store_true", help="Skip master key generation (test accounts)")
     sub.add_parser("logout", help="Clear login credentials (keeps consent and sessions)")
     pu = sub.add_parser("push", help="Upload privately to your account")
     pu.add_argument("session_id", nargs="?")
