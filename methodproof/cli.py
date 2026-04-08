@@ -1251,12 +1251,34 @@ def cmd_log(args: argparse.Namespace) -> None:
         print(f"  {s['id'][:8]}  {dt}  {dur}  {s['total_events']} events{suffix}")
 
 
+def cmd_logout(args: argparse.Namespace) -> None:
+    """Clear login credentials only. Keeps consent, sessions, and hooks."""
+    cfg = config.load()
+    if not cfg.get("token"):
+        print("Not logged in.")
+        return
+    old_email = cfg.get("email", "")
+    old_account = cfg.get("account_id", "")[:8]
+    for key in ("token", "refresh_token", "email", "account_id", "last_auth_at"):
+        cfg[key] = config._DEFAULTS.get(key, "")
+    config.save(cfg)
+    label = old_email or old_account or "account"
+    print(f"Logged out ({label}). Run `mp login` to sign in again.")
+
+
 def cmd_login(args: argparse.Namespace) -> None:
     import webbrowser
     from methodproof.sync import _request
 
     cfg = config.load()
     api = args.api_url or cfg["api_url"]
+
+    if cfg.get("token") and not getattr(args, "force", False):
+        current = cfg.get("email") or cfg.get("account_id", "")[:8] or "an account"
+        print(f"Already logged in as {current}.")
+        answer = input("  Switch accounts? [y/N]: ").strip().lower()
+        if answer not in ("y", "yes"):
+            return
 
     # Start device auth flow
     result = _request("POST", "/auth/cli/start", api, "")
@@ -1713,6 +1735,8 @@ def main() -> None:
     sub.add_parser("log", help="List sessions")
     l = sub.add_parser("login", help="Connect to platform")
     l.add_argument("--api-url")
+    l.add_argument("--force", "-f", action="store_true", help="Skip switch-account prompt")
+    sub.add_parser("logout", help="Clear login credentials (keeps consent and sessions)")
     pu = sub.add_parser("push", help="Upload privately to your account")
     pu.add_argument("session_id", nargs="?")
     tg = sub.add_parser("tag", help="Tag a session")
@@ -1771,7 +1795,7 @@ def main() -> None:
     args = p.parse_args()
     cmds = {
         "init": cmd_init, "start": cmd_start, "stop": cmd_stop,
-        "view": cmd_view, "log": cmd_log, "login": cmd_login,
+        "view": cmd_view, "log": cmd_log, "login": cmd_login, "logout": cmd_logout,
         "push": cmd_push, "tag": cmd_tag, "publish": cmd_publish,
         "delete": cmd_delete, "review": cmd_review, "consent": cmd_consent,
         "update": cmd_update, "lock": cmd_lock, "reset": cmd_reset, "uninstall": cmd_uninstall,
