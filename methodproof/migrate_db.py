@@ -1,9 +1,8 @@
 """Encrypt existing plaintext events in local DB after key setup."""
 
-import json
-
 from methodproof import store
 from methodproof.crypto import SENSITIVE_FIELDS, encrypt_field
+from methodproof.store import _compress_meta, _decompress_meta
 
 
 def migrate_encrypt(db_key: bytes) -> int:
@@ -18,7 +17,7 @@ def migrate_encrypt(db_key: bytes) -> int:
     encrypted = 0
     batch = []
     for row in rows:
-        meta = json.loads(row["metadata"])
+        meta = _decompress_meta(row["metadata"])
         changed = False
         for field in SENSITIVE_FIELDS:
             val = meta.get(field)
@@ -26,7 +25,7 @@ def migrate_encrypt(db_key: bytes) -> int:
                 meta[field] = encrypt_field(val, db_key)
                 changed = True
         if changed:
-            batch.append((json.dumps(meta), row["id"]))
+            batch.append((_compress_meta(meta), row["id"]))
             encrypted += 1
         if len(batch) >= 500:
             _flush_batch(db, batch)

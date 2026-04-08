@@ -606,8 +606,9 @@ def compute_outcomes(session_id: str) -> dict[str, Any]:
         if e["type"] not in prompt_types:
             continue
         try:
-            meta = json.loads(e["metadata"])
-        except (json.JSONDecodeError, TypeError) as exc:
+            from methodproof.store import _decompress_meta
+            meta = _decompress_meta(e["metadata"])
+        except (json.JSONDecodeError, TypeError, Exception) as exc:
             _warn("analysis.metadata_parse_failed", event_id=e["id"] if hasattr(e, "__getitem__") else "?", error=str(exc))
             continue
         intent = meta.get("sa_intent")

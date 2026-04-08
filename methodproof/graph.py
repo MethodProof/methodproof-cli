@@ -5,7 +5,7 @@ import time
 import uuid
 from typing import Any
 
-from methodproof.store import _db
+from methodproof.store import _compress_meta, _db, _decompress_meta
 
 
 def build(session_id: str) -> dict[str, int]:
@@ -53,7 +53,7 @@ def build(session_id: str) -> dict[str, int]:
 
     # Resources
     for e in events:
-        meta = json.loads(e["metadata"])
+        meta = _decompress_meta(e["metadata"])
         if e["type"] in ("llm_prompt", "llm_completion") and "model" in meta:
             _ensure_resource(db, "llm_model", meta["model"])
             stats["resources"] += 1
@@ -63,7 +63,7 @@ def build(session_id: str) -> dict[str, int]:
 
     # Artifacts
     for e in events:
-        meta = json.loads(e["metadata"])
+        meta = _decompress_meta(e["metadata"])
         if e["type"] in ("file_create", "file_edit") and "path" in meta:
             _ensure_artifact(db, meta["path"], meta.get("size", 0))
             stats["artifacts"] += 1
@@ -84,7 +84,7 @@ def build(session_id: str) -> dict[str, int]:
                 "(id, session_id, type, timestamp, duration_ms, metadata) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (uuid.uuid4().hex, session_id, "prompt_outcomes",
-                 time.time(), 0, json.dumps(outcomes)),
+                 time.time(), 0, _compress_meta(outcomes)),
             )
             stats["outcomes"] = 1
     except Exception as exc:
@@ -100,7 +100,7 @@ def _link(
     rel: str, window_sec: int, match_model: bool = False,
 ) -> int:
     model_clause = (
-        "AND json_extract(s.metadata, '$.model') = json_extract(t.metadata, '$.model')"
+        "AND json_extract(mp_json(s.metadata), '$.model') = json_extract(mp_json(t.metadata), '$.model')"
         if match_model else ""
     )
     sql = f"""
@@ -123,9 +123,9 @@ def _link_pasted(db: object, sid: str) -> int:
     FROM events s JOIN events t ON t.session_id = s.session_id
     WHERE s.session_id = ? AND s.type = 'browser_copy' AND t.type = 'file_edit'
       AND t.timestamp > s.timestamp AND (t.timestamp - s.timestamp) <= 30
-      AND abs(json_extract(t.metadata, '$.lines_added') * 40.0
-            - json_extract(s.metadata, '$.text_length'))
-          < json_extract(s.metadata, '$.text_length') * 0.2
+      AND abs(json_extract(mp_json(t.metadata), '$.lines_added') * 40.0
+            - json_extract(mp_json(s.metadata), '$.text_length'))
+          < json_extract(mp_json(s.metadata), '$.text_length') * 0.2
     """
     return db.execute(sql, (sid,)).rowcount
 
@@ -135,20 +135,20 @@ def _link_action_resources(db: object, sid: str) -> None:
     db.execute("""
     INSERT OR IGNORE INTO action_resources (action_id, resource_id, relation_type, metadata)
     SELECT e.id, r.id, 'SENT_TO', '{}'
-    FROM events e JOIN resources r ON r.identifier = json_extract(e.metadata, '$.model')
+    FROM events e JOIN resources r ON r.identifier = json_extract(mp_json(e.metadata), '$.model')
     WHERE e.session_id = ? AND e.type = 'llm_prompt' AND r.type = 'llm_model'
     """, (sid,))
     db.execute("""
     INSERT OR IGNORE INTO action_resources (action_id, resource_id, relation_type, metadata)
     SELECT e.id, r.id, 'CONSUMED', '{}'
-    FROM events e JOIN resources r ON r.identifier = json_extract(e.metadata, '$.model')
+    FROM events e JOIN resources r ON r.identifier = json_extract(mp_json(e.metadata), '$.model')
     WHERE e.session_id = ? AND e.type = 'llm_completion' AND r.type = 'llm_model'
     """, (sid,))
     # Agent gateway links
     db.execute("""
     INSERT OR IGNORE INTO action_resources (action_id, resource_id, relation_type, metadata)
     SELECT e.id, r.id, 'SENT_TO', '{}'
-    FROM events e JOIN resources r ON r.identifier = json_extract(e.metadata, '$.gateway')
+    FROM events e JOIN resources r ON r.identifier = json_extract(mp_json(e.metadata), '$.gateway')
     WHERE e.session_id = ? AND e.type = 'agent_prompt' AND r.type = 'agent_gateway'
     """, (sid,))
 
@@ -158,13 +158,13 @@ def _link_action_artifacts(db: object, sid: str) -> None:
     db.execute("""
     INSERT OR IGNORE INTO action_artifacts (action_id, artifact_id, relation_type)
     SELECT e.id, a.id, 'PRODUCED'
-    FROM events e JOIN artifacts a ON a.path = json_extract(e.metadata, '$.path')
+    FROM events e JOIN artifacts a ON a.path = json_extract(mp_json(e.metadata), '$.path')
     WHERE e.session_id = ? AND e.type = 'file_create'
     """, (sid,))
     db.execute("""
     INSERT OR IGNORE INTO action_artifacts (action_id, artifact_id, relation_type)
     SELECT e.id, a.id, 'MODIFIED'
-    FROM events e JOIN artifacts a ON a.path = json_extract(e.metadata, '$.path')
+    FROM events e JOIN artifacts a ON a.path = json_extract(mp_json(e.metadata), '$.path')
     WHERE e.session_id = ? AND e.type = 'file_edit'
     """, (sid,))
 

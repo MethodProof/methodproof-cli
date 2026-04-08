@@ -63,12 +63,25 @@ CREATE TABLE IF NOT EXISTS action_artifacts (
 _conn: sqlite3.Connection | None = None
 
 
+def _sqlite_decompress(raw: bytes | str | None) -> str | None:
+    """SQLite UDF: decompress zlib BLOBs to JSON text for json_extract()."""
+    if raw is None:
+        return None
+    if isinstance(raw, bytes):
+        try:
+            return zlib.decompress(raw).decode()
+        except zlib.error:
+            return raw.decode() if raw else "{}"
+    return raw
+
+
 def _db() -> sqlite3.Connection:
     global _conn
     if _conn is None:
         _conn = sqlite3.connect(str(config.DB_PATH), check_same_thread=False, timeout=10)
         _conn.execute("PRAGMA journal_mode=WAL")
         _conn.row_factory = sqlite3.Row
+        _conn.create_function("mp_json", 1, _sqlite_decompress)
     return _conn
 
 

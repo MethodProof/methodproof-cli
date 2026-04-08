@@ -257,7 +257,8 @@ def test_migrate_encrypts_plaintext():
     count = migrate_encrypt(key)
     assert count == 1
     row = store._db().execute("SELECT metadata FROM events WHERE id = 'e1'").fetchone()
-    assert "e2e:v1:" in json.loads(row["metadata"])["prompt_text"]
+    meta = store._decompress_meta(row["metadata"])
+    assert "e2e:v1:" in meta["prompt_text"]
 
 
 def test_migrate_idempotent():
