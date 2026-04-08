@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.7.5] — 2026-04-08
+## [0.7.6] — 2026-04-08
 
 ### Added
 - **Metadata compression** — event metadata stored as zlib-compressed BLOBs in SQLite (~80% storage reduction for journal-mode sessions). Existing uncompressed rows are silently migrated on next startup.
