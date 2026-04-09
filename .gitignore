@@ -8,3 +8,5 @@ build/
 *.key
 *.pem
 .DS_Store
+.coverage
+htmlcov/
