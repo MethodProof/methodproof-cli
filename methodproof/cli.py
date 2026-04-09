@@ -1293,6 +1293,89 @@ def cmd_log(args: argparse.Namespace) -> None:
         print(f"  {s['id'][:8]}  {dt}  {dur}  {s['total_events']} events{suffix}")
 
 
+def cmd_status(args: argparse.Namespace) -> None:
+    """Show auth, session, and config status at a glance."""
+    from methodproof import __version__
+    cfg = config.load()
+    token = cfg.get("token", "")
+    claims = _decode_jwt_claims(token) if token else {}
+    sessions = store.list_sessions()
+    active = cfg.get("active_session")
+    capture = cfg.get("capture", {})
+    enabled = [k for k, v in capture.items() if v]
+
+    print(f"\n  methodproof v{__version__}")
+    print(f"  api: {cfg.get('api_url', '—')}\n")
+
+    # Auth
+    if not token:
+        print("  auth: not signed in")
+    else:
+        account_id = claims.get("user_id", "—")
+        role = claims.get("role", "—")
+        acct_type = claims.get("account_type", "—")
+        exp = claims.get("exp", 0)
+        if exp and time.time() > exp:
+            expiry = "expired"
+        elif exp:
+            remaining = int(exp - time.time())
+            hours = remaining // 3600
+            mins = (remaining % 3600) // 60
+            expiry = f"{hours}h {mins}m remaining"
+        else:
+            expiry = "unknown"
+        print(f"  auth: signed in")
+        print(f"  account: {account_id[:8]}...{account_id[-4:]}")
+        print(f"  role: {role}  |  type: {acct_type}  |  token: {expiry}")
+        if claims.get("is_superadmin"):
+            print("  superadmin: yes")
+
+    # Session
+    print()
+    if active:
+        sess = store.get_session(active)
+        if sess:
+            dt = datetime.fromtimestamp(sess["created_at"], tz=UTC).strftime("%H:%M")
+            print(f"  session: RECORDING  {active[:8]}  started {dt}  ({sess['total_events']} events)")
+        else:
+            print(f"  session: RECORDING  {active[:8]}")
+    else:
+        print("  session: idle")
+
+    # Local sessions
+    total = len(sessions)
+    unsynced = len([s for s in sessions if not s["synced"] and s.get("completed_at") and s["total_events"] > 0])
+    print(f"  local: {total} session{'s' if total != 1 else ''}", end="")
+    if unsynced:
+        print(f"  ({unsynced} unsynced)")
+    else:
+        print()
+
+    # Capture config
+    print(f"\n  consent: {len(enabled)}/11 categories")
+    full_spectrum = len(enabled) >= 10
+    if full_spectrum:
+        print("  spectrum: FULL")
+
+    # Modes
+    modes = []
+    if cfg.get("journal_mode"):
+        credits = cfg.get("journal_credits", 0)
+        modes.append(f"journal ({credits} credits)")
+    if cfg.get("e2e_mode"):
+        fp = cfg.get("e2e_fingerprint", "")
+        modes.append(f"e2e ({fp[:8]})" if fp else "e2e")
+    if modes:
+        print(f"  modes: {' | '.join(modes)}")
+
+    # Research
+    if cfg.get("research_consent"):
+        level = cfg.get("contribution_level", "structural")
+        print(f"  research: opted in ({level})")
+
+    print()
+
+
 def cmd_logout(args: argparse.Namespace) -> None:
     """Clear login credentials only. Keeps consent, sessions, and hooks."""
     cfg = config.load()
@@ -1779,6 +1862,7 @@ def main() -> None:
     v = sub.add_parser("view", help="Inspect captured session data")
     v.add_argument("session_id", nargs="?")
     sub.add_parser("log", help="List sessions")
+    sub.add_parser("status", help="Auth, session, and config status")
     l = sub.add_parser("login", help="Connect to platform")
     l.add_argument("--api-url")
     l.add_argument("--force", "-f", action="store_true", help="Skip switch-account prompt")
@@ -1843,7 +1927,8 @@ def main() -> None:
     args = p.parse_args()
     cmds = {
         "init": cmd_init, "start": cmd_start, "stop": cmd_stop,
-        "view": cmd_view, "log": cmd_log, "login": cmd_login, "logout": cmd_logout,
+        "view": cmd_view, "log": cmd_log, "status": cmd_status,
+        "login": cmd_login, "logout": cmd_logout,
         "push": cmd_push, "tag": cmd_tag, "publish": cmd_publish,
         "delete": cmd_delete, "review": cmd_review, "consent": cmd_consent,
         "update": cmd_update, "lock": cmd_lock, "reset": cmd_reset, "uninstall": cmd_uninstall,
