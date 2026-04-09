@@ -1,6 +1,7 @@
 """SQLite store — sessions, events, graph relationships."""
 
 import json
+import os
 import sqlite3
 import time
 import uuid
@@ -163,6 +164,20 @@ def create_session(
          account_id or None, session_binding or None, device_id or None),
     )
     _db().commit()
+
+
+def find_active_for_dir(watch_dir: str) -> dict[str, str] | None:
+    """Find an active session watching the same or overlapping directory."""
+    rows = _db().execute(
+        "SELECT id, watch_dir FROM sessions WHERE completed_at IS NULL",
+    ).fetchall()
+    for r in rows:
+        existing = r[1]
+        if (watch_dir == existing
+                or watch_dir.startswith(existing + os.sep)
+                or existing.startswith(watch_dir + os.sep)):
+            return {"id": r[0], "watch_dir": r[1]}
+    return None
 
 
 def complete_session(session_id: str) -> None:

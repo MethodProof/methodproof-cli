@@ -986,6 +986,13 @@ def cmd_start(args: argparse.Namespace) -> None:
     _log_step("Creating session")
     sid = uuid.uuid4().hex
     watch_dir = os.path.abspath(args.dir or ".")
+
+    # Prevent concurrent sessions watching overlapping directories
+    conflict = store.find_active_for_dir(watch_dir)
+    if conflict:
+        print(f"Active session {conflict['id'][:8]} already watches {conflict['watch_dir']}")
+        print("Run `methodproof stop` first, or choose a different directory.")
+        sys.exit(1)
     repo_url = args.repo or repos.detect_repo(watch_dir)
     tags = args.tags.split(",") if args.tags else []
     visibility = "public" if args.public else "private"
