@@ -502,6 +502,8 @@ def _print_commands() -> None:
     print()
     print(f"  {_W}ACCOUNT{R}")
     print(f"    {_M}mp login{R}              Connect to platform (opens browser)")
+    print(f"    {_M}mp accounts{R}           List all accounts on this device")
+    print(f"    {_M}mp switch{R} {_D}[query]{R}     Quick-swap to another account")
     print(f"    {_M}mp consent{R}            Change capture, research, and redaction settings")
     print(f"    {_M}mp lock{R}                Destroy local encryption key {_D}(reversible){R}")
     print(f"    {_M}mp lock --purge{R}        Delete all local data {_D}(irreversible){R}")
@@ -561,6 +563,8 @@ def _print_commands_plain() -> None:
     print()
     print("  ACCOUNT")
     print("    mp login              Connect to platform (opens browser)")
+    print("    mp accounts           List all accounts on this device")
+    print("    mp switch [query]     Quick-swap to another account")
     print("    mp consent            Change capture, research, and redaction settings")
     print("    mp lock               Destroy local encryption key (reversible)")
     print("    mp lock --purge       Delete all local data (irreversible)")
@@ -1327,6 +1331,9 @@ def cmd_status(args: argparse.Namespace) -> None:
         print(f"  auth: signed in")
         print(f"  account: {account_id[:8]}...{account_id[-4:]}")
         print(f"  role: {role}  |  type: {acct_type}  |  token: {expiry}")
+        n_profiles = len(cfg.get("profiles", {}))
+        if n_profiles > 1:
+            print(f"  accounts: {n_profiles} on this device  (`mp switch` to swap)")
         if claims.get("is_superadmin"):
             print("  superadmin: yes")
 
@@ -1391,6 +1398,92 @@ def cmd_logout(args: argparse.Namespace) -> None:
     print(f"Logged out ({label}). Run `mp login` to sign in again.")
 
 
+def cmd_accounts(args: argparse.Namespace) -> None:
+    """List all accounts stored on this device."""
+    cfg = config.load()
+    profiles = config.list_profiles(cfg)
+    if not profiles:
+        print("No accounts. Run `mp login` to sign in.")
+        return
+    print()
+    for p in profiles:
+        marker = "*" if p.get("active") else " "
+        email = p.get("email", "")
+        aid = p.get("account_id", "")[:8]
+        label = email or aid or "unknown"
+        # Token status
+        token = p.get("token", "")
+        if token:
+            claims = _decode_jwt_claims(token)
+            exp = claims.get("exp", 0)
+            if exp and time.time() > exp:
+                status = "expired"
+            elif exp:
+                remaining = int(exp - time.time())
+                h, m = remaining // 3600, (remaining % 3600) // 60
+                status = f"{h}h {m}m"
+            else:
+                status = "valid"
+        else:
+            status = "no token"
+        print(f"  {marker} {label}  ({aid})  token: {status}")
+    print(f"\n  Switch: `mp switch <email or id prefix>`\n")
+
+
+def cmd_switch(args: argparse.Namespace) -> None:
+    """Quick-swap to a stored account profile."""
+    cfg = config.load()
+    profiles = cfg.get("profiles", {})
+
+    if not profiles:
+        print("No stored accounts. Run `mp login` to add one.")
+        return
+
+    query = getattr(args, "account", None)
+
+    if query:
+        # Direct match
+        target = config.find_profile(cfg, query)
+        if not target:
+            print(f"No account matching '{query}'. Run `mp accounts` to see stored accounts.")
+            return
+    else:
+        # Interactive picker
+        items = [(aid, p) for aid, p in profiles.items() if aid != cfg.get("account_id")]
+        if not items:
+            print("Only one account stored. Run `mp login` to add another.")
+            return
+        print()
+        for i, (aid, p) in enumerate(items, 1):
+            label = p.get("email") or aid[:8]
+            print(f"  {i}. {label}  ({aid[:8]})")
+        print()
+        try:
+            choice = input(f"  Switch to [1-{len(items)}]: ").strip()
+            idx = int(choice) - 1
+            if not 0 <= idx < len(items):
+                print("Cancelled.")
+                return
+        except (ValueError, EOFError, KeyboardInterrupt):
+            print("\nCancelled.")
+            return
+        target = items[idx][0]
+
+    if target == cfg.get("account_id"):
+        label = cfg.get("email") or target[:8]
+        print(f"Already active: {label}")
+        return
+
+    if config.restore_profile(cfg, target):
+        cfg = config.load()  # reload after swap
+        label = cfg.get("email") or cfg.get("account_id", "")[:8]
+        print(f"Switched to {label} ({cfg.get('account_id', '')[:8]}).")
+        # Re-setup master key for this account
+        _setup_master_key(cfg)
+    else:
+        print(f"Profile not found for {target[:8]}. Run `mp login`.")
+
+
 def cmd_login(args: argparse.Namespace) -> None:
     import webbrowser
     from methodproof.sync import _request
@@ -1404,6 +1497,8 @@ def cmd_login(args: argparse.Namespace) -> None:
         answer = input("  Switch accounts? [y/N]: ").strip().lower()
         if answer not in ("y", "yes"):
             return
+        # Stash current profile before switching
+        config.save_active_profile(cfg)
 
     # Start device auth flow
     result = _request("POST", "/auth/cli/start", api, "")
@@ -1437,12 +1532,17 @@ def cmd_login(args: argparse.Namespace) -> None:
                 cfg["last_auth_at"] = time.time()
                 cfg["master_key_fingerprint"] = ""  # clear stale fingerprint from previous account
                 config.save(cfg)
+                config.save_active_profile(cfg)
                 print(" done.\n")
                 if not getattr(args, "no_key", False):
                     _setup_master_key(cfg)
                 from methodproof.sync import sync_research_consent
                 sync_research_consent(cfg["token"], cfg["api_url"])
-                print("Logged in. Run `methodproof push` to upload sessions.")
+                label = cfg.get("email") or cfg.get("account_id", "")[:8]
+                profiles = cfg.get("profiles", {})
+                n = len(profiles)
+                print(f"Logged in as {label}. {n} account{'s' if n != 1 else ''} on this device.")
+                print("  Quick-swap: `mp switch`")
                 return
         except Exception:
             pass
@@ -1868,6 +1968,9 @@ def main() -> None:
     l.add_argument("--force", "-f", action="store_true", help="Skip switch-account prompt")
     l.add_argument("--no-key", action="store_true", help="Skip master key generation (test accounts)")
     sub.add_parser("logout", help="Clear login credentials (keeps consent and sessions)")
+    sub.add_parser("accounts", help="List all accounts on this device")
+    sw = sub.add_parser("switch", help="Quick-swap to another account")
+    sw.add_argument("account", nargs="?", help="Email or account ID prefix")
     pu = sub.add_parser("push", help="Upload privately to your account")
     pu.add_argument("session_id", nargs="?")
     pu.add_argument("--local", action="store_true", help="Push to local dev API (localhost:8000)")
@@ -1928,7 +2031,7 @@ def main() -> None:
     cmds = {
         "init": cmd_init, "start": cmd_start, "stop": cmd_stop,
         "view": cmd_view, "log": cmd_log, "status": cmd_status,
-        "login": cmd_login, "logout": cmd_logout,
+        "login": cmd_login, "logout": cmd_logout, "accounts": cmd_accounts, "switch": cmd_switch,
         "push": cmd_push, "tag": cmd_tag, "publish": cmd_publish,
         "delete": cmd_delete, "review": cmd_review, "consent": cmd_consent,
         "update": cmd_update, "lock": cmd_lock, "reset": cmd_reset, "uninstall": cmd_uninstall,

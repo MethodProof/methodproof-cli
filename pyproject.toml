@@ -11,7 +11,7 @@ readme = "README.md"
 proxy = ["mitmproxy>=10.0"]
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "pytest-cov>=5.0"]
 
 [project.scripts]
 methodproof = "methodproof.cli:main"
@@ -25,3 +25,13 @@ packages = ["methodproof"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "e2e: requires Docker infrastructure (just infra-up && just seed && just platform)",
+]
+
+[tool.coverage.run]
+source = ["methodproof"]
+omit = ["methodproof/wordlist.py"]
+
+[tool.coverage.report]
+show_missing = true

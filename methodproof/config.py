@@ -50,6 +50,7 @@ _DEFAULTS: dict[str, Any] = {
         "ai_responses": True,
         "code_capture": True,
     },
+    "profiles": {},
 }
 
 FREE_JOURNAL_MAX_HOURS = 4
@@ -154,3 +155,60 @@ def save(cfg: dict[str, Any]) -> None:
     ensure_dirs()
     CONFIG.write_text(json.dumps(cfg, indent=2) + "\n")
     secure_file(CONFIG)
+
+
+# --- Multi-account profiles ---
+
+_PROFILE_KEYS = [
+    "token", "refresh_token", "email", "account_id",
+    "last_auth_at", "master_key_fingerprint",
+    "e2e_mode", "e2e_fingerprint",
+    "journal_mode", "journal_credits",
+]
+
+
+def save_active_profile(cfg: dict[str, Any]) -> None:
+    """Stash current auth state into profiles dict, keyed by account_id."""
+    aid = cfg.get("account_id")
+    if not aid:
+        return
+    profiles = cfg.setdefault("profiles", {})
+    profiles[aid] = {k: cfg.get(k, _DEFAULTS.get(k, "")) for k in _PROFILE_KEYS}
+    save(cfg)
+
+
+def restore_profile(cfg: dict[str, Any], account_id: str) -> bool:
+    """Swap active auth state to a stored profile. Returns False if not found."""
+    profiles = cfg.get("profiles", {})
+    profile = profiles.get(account_id)
+    if not profile:
+        return False
+    save_active_profile(cfg)
+    for k in _PROFILE_KEYS:
+        cfg[k] = profile.get(k, _DEFAULTS.get(k, ""))
+    save(cfg)
+    return True
+
+
+def list_profiles(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return stored profiles with 'active' flag on the current account."""
+    active_id = cfg.get("account_id", "")
+    profiles = cfg.get("profiles", {})
+    result = []
+    for aid, p in profiles.items():
+        result.append({**p, "active": aid == active_id})
+    if active_id and active_id not in profiles:
+        result.append({
+            k: cfg.get(k, _DEFAULTS.get(k, "")) for k in _PROFILE_KEYS
+        } | {"active": True})
+    return result
+
+
+def find_profile(cfg: dict[str, Any], query: str) -> str | None:
+    """Match a profile by email or account_id prefix. Returns account_id or None."""
+    profiles = cfg.get("profiles", {})
+    q = query.lower().strip()
+    for aid, p in profiles.items():
+        if p.get("email", "").lower() == q or aid.startswith(q):
+            return aid
+    return None
