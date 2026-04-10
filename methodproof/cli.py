@@ -448,8 +448,8 @@ def cmd_init(args: argparse.Namespace) -> None:
         print("Signing key: exists")
 
     _print_intro()
-    print("  To activate now:  eval \"$(methodproof shell-hook)\"")
-    print("  Or restart your shell, then run: mp start\n")
+    print("  Restart your shell or run this to activate now:\n")
+    print("    eval \"$(methodproof shell-hook)\"\n")
 
 
 def cmd_shell_hook(_args: argparse.Namespace) -> None:

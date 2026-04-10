@@ -78,12 +78,13 @@ def get_shell_rc() -> tuple[Path, str]:
 
 def install() -> str:
     rc, hook_text = get_shell_rc()
+    shell = "PowerShell" if sys.platform == "win32" else os.path.basename(os.environ.get("SHELL", "bash"))
     if rc.exists() and MARKER in rc.read_text():
-        return f"Already installed in {rc}"
+        return f"already installed ({shell}: {rc})"
     rc.parent.mkdir(parents=True, exist_ok=True)
     with rc.open("a") as f:
         f.write(hook_text)
-    return str(rc)
+    return f"{shell}: {rc}"
 
 
 def is_installed() -> bool:
