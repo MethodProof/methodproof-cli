@@ -334,6 +334,11 @@ def _run_consent_detailed(cfg: dict) -> dict:
 def cmd_init(args: argparse.Namespace) -> None:
     config.ensure_dirs()
     cfg = config.load()
+    if getattr(args, "force", False):
+        for key in ("consent_acknowledged", "auto_update_offered", "alias_offered", "local_ai_ports_offered"):
+            cfg.pop(key, None)
+        config.save(cfg)
+
     if not cfg.get("consent_acknowledged"):
         cfg = _run_consent(cfg)
         config.save(cfg)
@@ -1952,7 +1957,8 @@ def main() -> None:
     p = argparse.ArgumentParser(prog="methodproof", description=_banner())
     sub = p.add_subparsers(dest="cmd")
 
-    sub.add_parser("init", help="Install shell hook")
+    s = sub.add_parser("init", help="Install shell hook")
+    s.add_argument("--force", action="store_true", help="Re-run all setup prompts from scratch")
     s = sub.add_parser("start", help="Start recording")
     s.add_argument("--dir", help="Directory to watch")
     s.add_argument("--repo", help="Git remote URL (overrides auto-detect)")
