@@ -448,7 +448,14 @@ def cmd_init(args: argparse.Namespace) -> None:
         print("Signing key: exists")
 
     _print_intro()
-    print("  Restart your shell, then run: mp start\n")
+    print("  To activate now:  eval \"$(methodproof shell-hook)\"")
+    print("  Or restart your shell, then run: mp start\n")
+
+
+def cmd_shell_hook(_args: argparse.Namespace) -> None:
+    """Print the shell hook text for the current shell (for eval)."""
+    _, hook_text = hook.get_shell_rc()
+    print(hook_text.strip())
 
 
 def _print_commands() -> None:
@@ -1959,6 +1966,7 @@ def main() -> None:
 
     s = sub.add_parser("init", help="Install shell hook")
     s.add_argument("--force", action="store_true", help="Re-run all setup prompts from scratch")
+    sub.add_parser("shell-hook", help="Print shell hook for eval (activates without restart)")
     s = sub.add_parser("start", help="Start recording")
     s.add_argument("--dir", help="Directory to watch")
     s.add_argument("--repo", help="Git remote URL (overrides auto-detect)")
@@ -2053,6 +2061,7 @@ def main() -> None:
         "e2e": lambda a: __import__("methodproof.e2e", fromlist=["cmd_e2e"]).cmd_e2e(a),
         "intro": lambda _: _print_intro(),
         "help": lambda _: _print_commands(),
+        "shell-hook": cmd_shell_hook,
         "mcp-serve": cmd_mcp_serve,
         "proxy": lambda a: __import__("methodproof.proxy", fromlist=["cmd_proxy"]).cmd_proxy(a),
     }
