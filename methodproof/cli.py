@@ -404,7 +404,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         from methodproof.hooks.openclaw_install import install as install_openclaw_hooks, install_skill
         oc_result = install_openclaw_hooks()
         if oc_result is None:
-            print("AI Agent Graph: Claude Code not found (hooks + skill skipped)")
+            print("AI Agent Graph: OpenClaw not found (hooks + skill skipped)")
         else:
             print(f"AI Agent Graph hooks: {oc_result}")
             skill_result = install_skill()
