@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.20] — 2026-04-11
+
+### Fixed
+- **TUI init layout** — toggle rows now use `height: auto` so long capture descriptions don't clip; `width: 1fr` on `.row-label` overrides the 24-char truncation from base CSS; Switch widgets widened from 4→6 for correct rendering; Full Spectrum status no longer cut off at 1 line
+- **TUI consent layout** — Switch widgets widened from 4→6 (same fix as init)
+- **TUI status markup** — `_token_expiry()` was returning Rich markup strings into `Text.append()`, which treats input as plain text; tags now rendered literally (e.g. `[#d93326]expires soon[/#d93326]`). Fixed to return `(text, style)` tuple and apply styles at call site
+- **Session complete timeout** — `mp push` was using 15s for the final `/complete` call, which times out on large sessions while the server drains the ingest queue and materializes stats. Raised to 90s. Timeout is now a configurable parameter on internal request helpers
+
 ## [0.7.6] — 2026-04-08
 
 ### Added

@@ -34,14 +34,16 @@ PrefsScreen {{
     margin: 0 0 1 0;
 }}
 .toggle-row {{
-    height: 2;
+    height: auto;
     align: left middle;
+    margin: 0 0 1 0;
 }}
 .toggle-row Switch {{
     margin: 0 1 0 0;
-    width: 4;
+    width: 6;
 }}
 .row-label {{
+    width: 1fr;
     color: {TEXT};
 }}
 .pro-row .row-label {{
@@ -55,16 +57,17 @@ PrefsScreen {{
     width: 5;
 }}
 .opt-row {{
-    height: 2;
+    height: auto;
     align: left middle;
+    margin: 0 0 1 0;
 }}
 .opt-row Switch {{
     margin: 0 1 0 0;
-    width: 4;
+    width: 6;
 }}
 #fs-status {{
     color: {DIM};
-    height: 1;
+    height: auto;
     margin: 1 0 0 0;
 }}
 #fs-status.full {{

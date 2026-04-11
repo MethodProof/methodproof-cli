@@ -53,7 +53,7 @@ _CSS = BASE_CSS + f"""
 }}
 .toggle-row Switch {{
     margin: 0 1 0 0;
-    width: 4;
+    width: 6;
 }}
 .pro-row .row-label {{
     color: {PURPLE};

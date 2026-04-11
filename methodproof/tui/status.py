@@ -19,15 +19,16 @@ def _tier_color(tier: str) -> str:
     return {"free": DIM, "basic": TEXT, "pro": GOLD, "team": PURPLE}.get(tier.lower(), TEXT)
 
 
-def _token_expiry(cfg: dict) -> str:
+def _token_expiry(cfg: dict) -> tuple[str, str]:
+    """Return (text, style) for token expiry display."""
     last_auth = cfg.get("last_auth_at", 0)
     if not last_auth:
-        return "unknown"
+        return "unknown", DIM
     age_h = (time.time() - last_auth) / 3600
     remaining_h = max(0, 24 - age_h)
     if remaining_h < 1:
-        return f"[{RED}]expires soon[/{RED}]"
-    return f"[{DIM}]expires in {int(remaining_h)}h[/{DIM}]"
+        return "expires soon", RED
+    return f"expires in {int(remaining_h)}h", DIM
 
 
 def run(cfg: dict) -> None:
@@ -52,7 +53,8 @@ def run(cfg: dict) -> None:
     acct_lines.append("  ·  ", style=DIM)
     acct_lines.append(tier, style=_tier_color(tier))
     acct_lines.append("\n")
-    acct_lines.append(_token_expiry(cfg), style=DIM)
+    expiry_text, expiry_style = _token_expiry(cfg)
+    acct_lines.append(expiry_text, style=expiry_style)
 
     console.print(Panel(
         acct_lines,

@@ -30,6 +30,7 @@ def sync_metadata(session: dict[str, Any], token: str, api_url: str) -> None:
 def _raw_request(
     method: str, url: str, token: str,
     body: dict[str, Any] | None = None,
+    timeout: int = 15,
 ) -> dict[str, Any]:
     if body is not None:
         data = gzip.compress(json.dumps(body).encode())
@@ -39,7 +40,7 @@ def _raw_request(
     if data is not None:
         headers["Content-Encoding"] = "gzip"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read())
 
 
@@ -57,10 +58,11 @@ def _refresh_token(api_url: str, refresh: str) -> tuple[str, str] | None:
 def _request(
     method: str, path: str, api_url: str, token: str,
     body: dict[str, Any] | None = None,
+    timeout: int = 15,
 ) -> dict[str, Any]:
     url = f"{api_url}{path}"
     try:
-        return _raw_request(method, url, token, body)
+        return _raw_request(method, url, token, body, timeout=timeout)
     except urllib.error.HTTPError as exc:
         if exc.code == 401:
             from methodproof import config
@@ -71,7 +73,7 @@ def _request(
                 if pair:
                     cfg["token"], cfg["refresh_token"] = pair
                     config.save(cfg)
-                    return _raw_request(method, url, cfg["token"], body)
+                    return _raw_request(method, url, cfg["token"], body, timeout=timeout)
             raise SystemExit("Session expired. Run `methodproof login` to re-authenticate.") from None
         detail = ""
         if exc.fp:
@@ -170,8 +172,8 @@ def push(session_id: str, token: str, api_url: str) -> str:
         except ImportError:
             pass  # cryptography not installed
 
-    # Complete
-    _request("PUT", f"/personal/sessions/{remote_id}/complete", api_url, token)
+    # Complete (server drains ingest queue + materializes stats — needs longer timeout)
+    _request("PUT", f"/personal/sessions/{remote_id}/complete", api_url, token, timeout=90)
     store.mark_synced(session_id, remote_id)
 
     # Sync metadata (repo, tags, visibility)
