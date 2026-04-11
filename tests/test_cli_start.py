@@ -427,21 +427,11 @@ def test_consent_detailed_redaction_toggle():
 # ── cmd_init ──
 
 
-@patch("methodproof.integrity.has_keypair", return_value=True)
-@patch("methodproof.sync.sync_research_consent")
-@patch("methodproof.hooks.wrappers.install", return_value=[])
-@patch("methodproof.mcp.register_with_claude", return_value="registered")
-@patch("methodproof.hooks.install.install", return_value="installed")
-@patch("methodproof.hooks.openclaw_install.install", return_value="installed")
-@patch("methodproof.hook.install", return_value="hook installed")
-def test_init_first_run(mock_hook, mock_oc, mock_claude, mock_mcp, mock_wrap, mock_consent,
-                         mock_keypair, cli_args, capsys):
-    # input() calls: auto-update, alias, local AI ports
-    with patch("methodproof.cli._run_consent", return_value=config.load()) as mock_run_consent, \
-         patch("builtins.input", side_effect=["N", "N", "N"]):
-        cli.cmd_init(cli_args())
-    mock_run_consent.assert_called_once()
-    mock_hook.assert_called_once()
+@patch("methodproof.tui.init.run")
+def test_init_first_run(mock_tui_init, cli_args):
+    # First run: consent_acknowledged=False forces TUI regardless of ui_mode
+    cli.cmd_init(cli_args())
+    mock_tui_init.assert_called_once()
 
 
 @patch("methodproof.integrity.has_keypair", return_value=True)
@@ -450,7 +440,7 @@ def test_init_already_configured(mock_hook, mock_keypair, cli_args, capsys):
     cfg = config.load()
     cfg["consent_acknowledged"] = True
     config.save(cfg)
-    # input() calls: auto-update, alias, local AI ports
-    with patch("builtins.input", side_effect=["N", "N", "N"]):
+    # input() calls: auto-update, alias, ui-mode, local AI ports
+    with patch("builtins.input", side_effect=["N", "N", "N", "N"]):
         cli.cmd_init(cli_args())
     mock_hook.assert_called_once()

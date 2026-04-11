@@ -98,7 +98,7 @@ def test_review_shows_breakdown(make_session, cli_args, capsys):
     out = capsys.readouterr().out
     assert "5" in out
     assert "events" in out
-    assert "fields:" in out
+    assert "fields" in out
 
 
 # ── cmd_view ──

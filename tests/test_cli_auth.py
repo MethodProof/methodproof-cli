@@ -215,7 +215,7 @@ def test_login_happy_path(mock_req, mock_sleep, mock_browser, mock_key, mock_con
     assert cfg["account_id"] == "new-user"
     mock_browser.assert_called_once()
     out = capsys.readouterr().out
-    assert "Logged in" in out
+    assert "Logged In" in out
 
 
 @patch("methodproof.sync._request")

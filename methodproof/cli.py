@@ -1398,7 +1398,6 @@ def cmd_log(args: argparse.Namespace) -> None:
             return
         print(f"Found {len(empty)} empty session{'s' if len(empty) != 1 else ''}:")
         for s in empty:
-            from datetime import datetime, UTC
             dt = datetime.fromtimestamp(s["created_at"], tz=UTC).strftime("%Y-%m-%d %H:%M")
             print(f"  {s['id'][:8]}  {dt}  {s.get('watch_dir', '?')}")
         answer = input(f"\nDelete {len(empty)} empty session{'s' if len(empty) != 1 else ''}? [y/N]: ").strip().lower()

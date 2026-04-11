@@ -27,7 +27,8 @@ def isolate_fs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(config, "CONFIG", mp_dir / "config.json")
     monkeypatch.setattr(config, "DB_PATH", mp_dir / "methodproof.db")
     monkeypatch.setattr(config, "CMD_LOG", mp_dir / "commands.jsonl")
-    (mp_dir / "config.json").write_text(json.dumps(dict(config._DEFAULTS), indent=2))
+    defaults = {**config._DEFAULTS, "ui_mode": False}
+    (mp_dir / "config.json").write_text(json.dumps(defaults, indent=2))
     monkeypatch.setattr(store, "_conn", None)
     store.init_db()
     return tmp_path
