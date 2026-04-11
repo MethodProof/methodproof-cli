@@ -1391,6 +1391,25 @@ def cmd_view(args: argparse.Namespace) -> None:
 
 
 def cmd_log(args: argparse.Namespace) -> None:
+    if getattr(args, "purge_empty", False):
+        empty = [s for s in store.list_sessions() if s["total_events"] == 0]
+        if not empty:
+            print("No empty sessions.")
+            return
+        print(f"Found {len(empty)} empty session{'s' if len(empty) != 1 else ''}:")
+        for s in empty:
+            from datetime import datetime, UTC
+            dt = datetime.fromtimestamp(s["created_at"], tz=UTC).strftime("%Y-%m-%d %H:%M")
+            print(f"  {s['id'][:8]}  {dt}  {s.get('watch_dir', '?')}")
+        answer = input(f"\nDelete {len(empty)} empty session{'s' if len(empty) != 1 else ''}? [y/N]: ").strip().lower()
+        if answer != "y":
+            print("Cancelled.")
+            return
+        for s in empty:
+            store.delete_session(s["id"])
+        print(f"Deleted {len(empty)} empty session{'s' if len(empty) != 1 else ''}.")
+        return
+
     cfg = config.load()
     if _resolve_ui(args, cfg):
         _tui_guard()
@@ -2109,6 +2128,7 @@ def main() -> None:
     v = sub.add_parser("view", help="Inspect captured session data")
     v.add_argument("session_id", nargs="?")
     l_log = sub.add_parser("log", help="List sessions")
+    l_log.add_argument("--purge-empty", action="store_true", help="Delete all sessions with 0 events")
     _add_ui_flags(l_log)
     s_status = sub.add_parser("status", help="Auth, session, and config status")
     _add_ui_flags(s_status)
