@@ -1336,8 +1336,16 @@ def cmd_stop(args: argparse.Namespace) -> None:
     cfg = config.load()
     sid = cfg.get("active_session")
     if not sid:
-        print("No active session.")
-        sys.exit(1)
+        # Config lost track — check store for dangling sessions on this directory
+        watch_dir = os.path.abspath(".")
+        dangling = store.find_active_for_dir(watch_dir)
+        if dangling:
+            sid = dangling["id"]
+            cfg["active_session"] = sid
+            config.save(cfg)
+        else:
+            print("No active session.")
+            sys.exit(1)
 
     # Signal the start process if it's running
     if PIDFILE.exists():
