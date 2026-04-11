@@ -1646,13 +1646,15 @@ def cmd_login(args: argparse.Namespace) -> None:
     api = args.api_url or cfg["api_url"]
 
     if cfg.get("token") and not getattr(args, "force", False):
-        current = cfg.get("email") or cfg.get("account_id", "")[:8] or "an account"
-        print(f"Already logged in as {current}.")
-        answer = input("  Switch accounts? [y/N]: ").strip().lower()
-        if answer not in ("y", "yes"):
-            return
-        # Stash current profile before switching
-        config.save_active_profile(cfg)
+        if getattr(args, "add", False):
+            config.save_active_profile(cfg)
+        else:
+            current = cfg.get("email") or cfg.get("account_id", "")[:8] or "an account"
+            print(f"Already logged in as {current}.")
+            answer = input("  Switch accounts? [y/N]: ").strip().lower()
+            if answer not in ("y", "yes"):
+                return
+            config.save_active_profile(cfg)
 
     # Start device auth flow
     result = _request("POST", "/auth/cli/start", api, "")
@@ -1660,6 +1662,9 @@ def cmd_login(args: argparse.Namespace) -> None:
     auth_url = result["auth_url"]
     user_code = result.get("user_code", "")
     verification_url = result.get("verification_url", "")
+
+    if getattr(args, "add", False):
+        auth_url += ("&" if "?" in auth_url else "?") + "mode=add"
 
     print(f"\nOpening browser to sign in...\n")
     print(f"  {auth_url}\n")
@@ -1692,11 +1697,13 @@ def cmd_login(args: argparse.Namespace) -> None:
                     _setup_master_key(cfg)
                 from methodproof.sync import sync_research_consent
                 sync_research_consent(cfg["token"], cfg["api_url"])
-                label = cfg.get("email") or cfg.get("account_id", "")[:8]
-                profiles = cfg.get("profiles", {})
-                n = len(profiles)
-                print(f"Logged in as {label}. {n} account{'s' if n != 1 else ''} on this device.")
-                print("  Quick-swap: `mp switch`")
+                from methodproof.tui.login_success import run as show_success
+                show_success(
+                    display_name=cfg.get("email") or cfg.get("account_id", "")[:8],
+                    email=cfg.get("email", ""),
+                    account_count=len(cfg.get("profiles", {})),
+                    added=getattr(args, "add", False),
+                )
                 return
         except Exception:
             pass
@@ -2134,6 +2141,7 @@ def main() -> None:
     _add_ui_flags(s_status)
     l = sub.add_parser("login", help="Connect to platform")
     l.add_argument("--api-url")
+    l.add_argument("--add", action="store_true", help="Add another account to this device")
     l.add_argument("--force", "-f", action="store_true", help="Skip switch-account prompt")
     l.add_argument("--no-key", action="store_true", help="Skip master key generation (test accounts)")
     sub.add_parser("logout", help="Clear login credentials (keeps consent and sessions)")
