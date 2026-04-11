@@ -343,13 +343,9 @@ def cmd_init(args: argparse.Namespace) -> None:
     needs_setup = not cfg.get("consent_acknowledged")
     use_ui = needs_setup or _resolve_ui(args, cfg)
     if use_ui:
-        try:
-            _tui_guard()
-            from methodproof.tui.init import run as tui_init
-            tui_init(cfg)
-            return
-        except SystemExit:
-            pass  # textual not installed — fall through to classic
+        from methodproof.tui.init import run as tui_init
+        tui_init(cfg)
+        return
 
     if not cfg.get("consent_acknowledged"):
         cfg = _run_consent(cfg)
@@ -1243,14 +1239,10 @@ def cmd_start(args: argparse.Namespace) -> None:
             except Exception as exc:
                 print(f"Extension: not detected ({exc})")
         if _resolve_ui(args, cfg):
-            try:
-                _tui_guard()
-                session = store.get_session(sid)
-                from methodproof.tui.start import run as tui_start
-                tui_start(sid, session)
-                return
-            except SystemExit:
-                pass  # textual not installed — fall through to plain message
+            session = store.get_session(sid)
+            from methodproof.tui.start import run as tui_start
+            tui_start(sid, session)
+            return
         print("Run `mp stop` to finish.")
         return
 
