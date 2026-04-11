@@ -8,7 +8,7 @@ from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Label, RichLog, Rule, Static, Switch
 
 from methodproof import config as cfg_mod
-from methodproof.tui.theme import BASE_CSS, BORDER, DIM, GOLD, GREEN, PURPLE, RED, TEXT
+from methodproof.tui.theme import BASE_CSS, BG, BORDER, DIM, GOLD, GREEN, PURPLE, RED, TEXT
 
 _REDACTABLE = [
     ("command_output", "Terminal output"),
@@ -33,14 +33,28 @@ PrefsScreen {{
     color: {DIM};
     margin: 0 0 1 0;
 }}
+Switch {{
+    border: none;
+    height: 1;
+    width: 10;
+    background: {BORDER};
+    padding: 0 1;
+}}
+Switch.-on {{
+    background: {GREEN};
+}}
+Switch .switch--slider {{
+    color: {TEXT};
+    background: {DIM};
+}}
+Switch.-on .switch--slider {{
+    color: {BG};
+    background: {TEXT};
+}}
 .toggle-row {{
-    height: auto;
+    height: 1;
     align: left middle;
     margin: 0 0 1 0;
-}}
-.toggle-row Switch {{
-    margin: 0 1 0 0;
-    width: 6;
 }}
 .row-label {{
     width: 1fr;
@@ -57,13 +71,9 @@ PrefsScreen {{
     width: 5;
 }}
 .opt-row {{
-    height: auto;
+    height: 1;
     align: left middle;
     margin: 0 0 1 0;
-}}
-.opt-row Switch {{
-    margin: 0 1 0 0;
-    width: 6;
 }}
 #fs-status {{
     color: {DIM};

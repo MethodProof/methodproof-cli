@@ -334,62 +334,74 @@ def _run_consent_detailed(cfg: dict) -> dict:
 def cmd_init(args: argparse.Namespace) -> None:
     config.ensure_dirs()
     cfg = config.load()
+    yes = getattr(args, "yes", False)
     if getattr(args, "force", False):
         for key in ("consent_acknowledged", "auto_update_offered", "alias_offered", "local_ai_ports_offered", "ui_mode_offered"):
             cfg.pop(key, None)
         config.save(cfg)
 
-    # TUI wizard — runs when nothing is set up yet, or on --force, or when ui_mode is on
-    needs_setup = not cfg.get("consent_acknowledged")
-    use_ui = needs_setup or _resolve_ui(args, cfg)
-    if use_ui:
-        from methodproof.tui.init import run as tui_init
-        tui_init(cfg)
-        return
-
     if not cfg.get("consent_acknowledged"):
-        cfg = _run_consent(cfg)
-        config.save(cfg)
-        if cfg.get("token"):
-            cfg["_pending_research_sync"] = True
+        if yes:
+            from methodproof import config as cfg_mod
+            cfg["capture"] = dict(cfg_mod._DEFAULTS["capture"])
+            cfg["publish_redact"] = dict(cfg_mod._DEFAULTS["publish_redact"])
+            cfg["consent_acknowledged"] = True
             config.save(cfg)
-            from methodproof.sync import sync_research_consent
-            sync_research_consent(cfg["token"], cfg["api_url"])
-        print()
+            print("Capture: all defaults accepted")
+        else:
+            cfg = _run_consent(cfg)
+            config.save(cfg)
+            if cfg.get("token"):
+                cfg["_pending_research_sync"] = True
+                config.save(cfg)
+                from methodproof.sync import sync_research_consent
+                sync_research_consent(cfg["token"], cfg["api_url"])
+            print()
 
     capture = cfg.get("capture", {})
     store.init_db()
 
     # Offer auto-update (recommended)
     if not cfg.get("auto_update_offered"):
-        answer = input("Enable auto-update (recommended)? [Y/n]: ").strip().lower()
-        cfg["auto_update_offered"] = True
-        cfg["auto_update"] = answer != "n"
-        print(f"Auto-update: {'ON — updates install before each session' if cfg['auto_update'] else 'OFF — toggle with: mp update --auto'}")
+        if yes:
+            cfg["auto_update_offered"] = True
+            cfg["auto_update"] = True
+            print("Auto-update: ON")
+        else:
+            answer = input("Enable auto-update (recommended)? [Y/n]: ").strip().lower()
+            cfg["auto_update_offered"] = True
+            cfg["auto_update"] = answer != "n"
+            print(f"Auto-update: {'ON — updates install before each session' if cfg['auto_update'] else 'OFF — toggle with: mp update --auto'}")
         config.save(cfg)
 
     # Offer mp alias
     if not cfg.get("alias_offered"):
-        answer = input("Install `mp` as a shorthand alias? [Y/n]: ").strip().lower()
-        cfg["alias_offered"] = True
-        if answer != "n":
+        if yes:
             _install_alias()
+            cfg["alias_offered"] = True
             cfg["alias_installed"] = True
             print("Alias: mp -> methodproof")
         else:
-            print("Alias: skipped")
+            answer = input("Install `mp` as a shorthand alias? [Y/n]: ").strip().lower()
+            cfg["alias_offered"] = True
+            if answer != "n":
+                _install_alias()
+                cfg["alias_installed"] = True
+                print("Alias: mp -> methodproof")
+            else:
+                print("Alias: skipped")
         config.save(cfg)
 
     # Offer classic CLI mode (TUI is default)
     if not cfg.get("ui_mode_offered"):
         cfg["ui_mode_offered"] = True
-        answer = input("Prefer classic terminal output instead of the rich TUI? [y/N]: ").strip().lower()
-        if answer == "y":
-            cfg["ui_mode"] = False
-            print("Output mode: classic  (toggle anytime with: mp ui on/off)")
-        else:
+        if yes:
             cfg["ui_mode"] = True
-            print("Output mode: rich TUI  (toggle anytime with: mp ui off)")
+            print("Output mode: rich TUI")
+        else:
+            answer = input("Prefer classic terminal output instead of the rich TUI? [y/N]: ").strip().lower()
+            cfg["ui_mode"] = answer != "y"
+            print(f"Output mode: {'classic  (toggle anytime with: mp ui on/off)' if not cfg['ui_mode'] else 'rich TUI  (toggle anytime with: mp ui off)'}")
         config.save(cfg)
 
     # Shell hook — needed for terminal commands
@@ -440,19 +452,23 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     # Local AI ports — capture traffic from local LLM servers
     if ai_enabled and not cfg.get("local_ai_ports_offered"):
-        answer = input("Run any local AI models (Ollama, LM Studio, vLLM, etc.)? [y/N]: ").strip().lower()
         cfg["local_ai_ports_offered"] = True
-        if answer == "y":
-            raw = input("Enter ports (comma-separated, e.g. 8080,5000,7860): ").strip()
-            ports = [int(p.strip()) for p in raw.split(",") if p.strip().isdigit()]
-            cfg["local_ai_ports"] = ports
-            if ports:
-                print(f"Local AI ports: {', '.join(str(p) for p in ports)} (proxy will decode these)")
-            else:
-                print("Local AI ports: none added")
-        else:
+        if yes:
             cfg["local_ai_ports"] = []
-            print("Local AI ports: skipped (built-in: Ollama 11434, Jan 1234)")
+            print("Local AI ports: using defaults (Ollama 11434, Jan 1234)")
+        else:
+            answer = input("Run any local AI models (Ollama, LM Studio, vLLM, etc.)? [y/N]: ").strip().lower()
+            if answer == "y":
+                raw = input("Enter ports (comma-separated, e.g. 8080,5000,7860): ").strip()
+                ports = [int(p.strip()) for p in raw.split(",") if p.strip().isdigit()]
+                cfg["local_ai_ports"] = ports
+                if ports:
+                    print(f"Local AI ports: {', '.join(str(p) for p in ports)} (proxy will decode these)")
+                else:
+                    print("Local AI ports: none added")
+            else:
+                cfg["local_ai_ports"] = []
+                print("Local AI ports: skipped (built-in: Ollama 11434, Jan 1234)")
         config.save(cfg)
 
     # Signing keypair for attestation
@@ -2115,6 +2131,7 @@ def main() -> None:
 
     s = sub.add_parser("init", help="Install shell hook")
     s.add_argument("--force", action="store_true", help="Re-run all setup prompts from scratch")
+    s.add_argument("-y", "--yes", action="store_true", help="Accept all defaults, no prompts")
     _add_ui_flags(s)
     sub.add_parser("shell-hook", help="Print shell hook for eval (activates without restart)")
     s = sub.add_parser("start", help="Start recording")
