@@ -2079,7 +2079,9 @@ def cmd_extension(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    from methodproof import __version__
     p = argparse.ArgumentParser(prog="methodproof", description=_banner())
+    p.add_argument("--version", action="version", version=f"methodproof {__version__}")
     sub = p.add_subparsers(dest="cmd")
 
     s = sub.add_parser("init", help="Install shell hook")
