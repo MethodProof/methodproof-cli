@@ -1203,8 +1203,11 @@ def cmd_start(args: argparse.Namespace) -> None:
         config.save(cfg)
 
     active = [k for k, v in capture.items() if v]
+    username = cfg.get("username")
+    account_label = f"@{username}" if username else (cfg.get("email") or cfg.get("account_id", "")[:8])
     print(f"\n{_banner()}")
     print(f"Recording: {sid[:8]}")
+    print(f"Account:   {account_label}")
     print(f"Watching:  {watch_dir}")
     if repo_url:
         print(f"Repo:      {repo_url}")
@@ -1397,7 +1400,7 @@ def cmd_stop(args: argparse.Namespace) -> None:
     session = store.get_session(sid)
     cfg["active_session"] = None
     config.save(cfg)
-    _print_summary(session, stats)
+    _print_summary(session, stats, cfg)
 
 
 def cmd_view(args: argparse.Namespace) -> None:
@@ -1705,6 +1708,13 @@ def cmd_login(args: argparse.Namespace) -> None:
                 cfg["account_id"] = claims.get("user_id", "")
                 cfg["last_auth_at"] = time.time()
                 cfg["master_key_fingerprint"] = ""  # clear stale fingerprint from previous account
+                # Fetch profile to store email and username
+                try:
+                    profile = _request("GET", "/auth/me", api, poll["token"])
+                    cfg["email"] = profile.get("email", "")
+                    cfg["username"] = profile.get("username") or ""
+                except Exception as exc:
+                    _log_debug("auth.profile_fetch_failed", error=str(exc))
                 config.save(cfg)
                 config.save_active_profile(cfg)
                 print(" done.\n")
@@ -1714,7 +1724,7 @@ def cmd_login(args: argparse.Namespace) -> None:
                 sync_research_consent(cfg["token"], cfg["api_url"])
                 from methodproof.tui.login_success import run as show_success
                 show_success(
-                    display_name=cfg.get("email") or cfg.get("account_id", "")[:8],
+                    display_name=cfg.get("username") or cfg.get("email") or cfg.get("account_id", "")[:8],
                     email=cfg.get("email", ""),
                     account_count=len(cfg.get("profiles", {})),
                     added=getattr(args, "add", False),
@@ -2011,11 +2021,16 @@ def _duration(s: dict) -> str:
     return f"{secs // 60}:{secs % 60:02d}"
 
 
-def _print_summary(session: dict | None, stats: dict) -> None:
+def _print_summary(session: dict | None, stats: dict, cfg: dict | None = None) -> None:
     if not session:
         return
+    cfg = cfg or {}
+    username = cfg.get("username")
+    account_label = f"@{username}" if username else (cfg.get("email") or cfg.get("account_id", "")[:8])
     print(f"\n{_banner()}")
     print(f"Session:  {session['id'][:8]}")
+    if account_label:
+        print(f"  Account:  {account_label}")
     print(f"  Events:   {session['total_events']}")
     print(f"  Duration: {_duration(session)}")
     print(f"  Graph:    {stats['next']} links, {stats['causal']} causal")

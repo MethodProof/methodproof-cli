@@ -42,6 +42,7 @@ _DEFAULTS: dict[str, Any] = {
     "e2e_fingerprint": "",
     "auto_update": False,
     "account_id": "",
+    "username": "",
     "last_auth_at": 0,
     "local_ai_ports": [],  # user-configured localhost ports for local LLM capture
     "publish_redact": {
@@ -161,7 +162,7 @@ def save(cfg: dict[str, Any]) -> None:
 # --- Multi-account profiles ---
 
 _PROFILE_KEYS = [
-    "token", "refresh_token", "email", "account_id",
+    "token", "refresh_token", "email", "account_id", "username",
     "last_auth_at", "master_key_fingerprint",
     "e2e_mode", "e2e_fingerprint",
     "journal_mode", "journal_credits",
