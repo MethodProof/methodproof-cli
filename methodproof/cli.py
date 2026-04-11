@@ -339,6 +339,18 @@ def cmd_init(args: argparse.Namespace) -> None:
             cfg.pop(key, None)
         config.save(cfg)
 
+    # TUI wizard — runs when nothing is set up yet, or on --force, or when ui_mode is on
+    needs_setup = not cfg.get("consent_acknowledged")
+    use_ui = needs_setup or _resolve_ui(args, cfg)
+    if use_ui:
+        try:
+            _tui_guard()
+            from methodproof.tui.init import run as tui_init
+            tui_init(cfg)
+            return
+        except SystemExit:
+            pass  # textual not installed — fall through to classic
+
     if not cfg.get("consent_acknowledged"):
         cfg = _run_consent(cfg)
         config.save(cfg)
@@ -2086,6 +2098,7 @@ def main() -> None:
 
     s = sub.add_parser("init", help="Install shell hook")
     s.add_argument("--force", action="store_true", help="Re-run all setup prompts from scratch")
+    _add_ui_flags(s)
     sub.add_parser("shell-hook", help="Print shell hook for eval (activates without restart)")
     s = sub.add_parser("start", help="Start recording")
     s.add_argument("--dir", help="Directory to watch")
