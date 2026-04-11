@@ -335,7 +335,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     config.ensure_dirs()
     cfg = config.load()
     if getattr(args, "force", False):
-        for key in ("consent_acknowledged", "auto_update_offered", "alias_offered", "local_ai_ports_offered"):
+        for key in ("consent_acknowledged", "auto_update_offered", "alias_offered", "local_ai_ports_offered", "ui_mode_offered"):
             cfg.pop(key, None)
         config.save(cfg)
 
@@ -370,6 +370,18 @@ def cmd_init(args: argparse.Namespace) -> None:
             print("Alias: mp -> methodproof")
         else:
             print("Alias: skipped")
+        config.save(cfg)
+
+    # Offer classic CLI mode (TUI is default)
+    if not cfg.get("ui_mode_offered"):
+        cfg["ui_mode_offered"] = True
+        answer = input("Prefer classic terminal output instead of the rich TUI? [y/N]: ").strip().lower()
+        if answer == "y":
+            cfg["ui_mode"] = False
+            print("Output mode: classic  (toggle anytime with: mp ui on/off)")
+        else:
+            cfg["ui_mode"] = True
+            print("Output mode: rich TUI  (toggle anytime with: mp ui off)")
         config.save(cfg)
 
     # Shell hook — needed for terminal commands
@@ -456,6 +468,58 @@ def cmd_shell_hook(_args: argparse.Namespace) -> None:
     """Print the shell hook text for the current shell (for eval)."""
     _, hook_text = hook.get_shell_rc()
     print(hook_text.strip())
+
+
+# ── TUI mode helpers ──────────────────────────────────────────────────────────
+
+def _add_ui_flags(parser: argparse.ArgumentParser) -> None:
+    """Add --ui / --no-ui flags to a subparser."""
+    g = parser.add_mutually_exclusive_group()
+    g.add_argument("--ui", dest="ui", action="store_true", default=None, help="Force TUI output")
+    g.add_argument("--no-ui", dest="ui", action="store_false", help="Force classic output")
+
+
+def _tui_guard() -> None:
+    """Raise SystemExit with install hint if textual is not installed."""
+    import importlib.util
+    if importlib.util.find_spec("textual") is None:
+        raise SystemExit(
+            "TUI mode requires the ui extras.\n"
+            "Install with:  pip install methodproof[ui]\n"
+            "Or switch back: mp ui off"
+        )
+
+
+def _resolve_ui(args: argparse.Namespace, cfg: dict) -> bool:
+    """Return True if TUI mode should be used for this invocation."""
+    flag = getattr(args, "ui", None)  # True / False / None (not specified)
+    if flag is True:
+        return True
+    if flag is False:
+        return False
+    return cfg.get("ui_mode", True)
+
+
+def cmd_ui(args: argparse.Namespace) -> None:
+    """Toggle or report TUI mode."""
+    import importlib.util
+    cfg = config.load()
+    sub = getattr(args, "ui_cmd", None)
+    if sub == "on":
+        cfg["ui_mode"] = True
+        config.save(cfg)
+        print("TUI mode: on  (mp consent, mp log, mp start, mp status, mp review)")
+        if importlib.util.find_spec("textual") is None:
+            print("Install libraries:  pip install methodproof[ui]")
+    elif sub == "off":
+        cfg["ui_mode"] = False
+        config.save(cfg)
+        print("TUI mode: off  (classic terminal output)")
+    else:
+        mode = cfg.get("ui_mode", True)
+        installed = importlib.util.find_spec("textual") is not None
+        print(f"TUI mode:  {'on' if mode else 'off'}")
+        print(f"Libraries: {'installed ✓' if installed else 'not installed  (pip install methodproof[ui])'}")
 
 
 def _print_commands() -> None:
@@ -738,6 +802,18 @@ def cmd_reset(args: argparse.Namespace) -> None:
 def cmd_consent(args: argparse.Namespace) -> None:
     """Review or change capture, research, and redaction settings."""
     cfg = config.load()
+    if _resolve_ui(args, cfg):
+        _tui_guard()
+        from methodproof.tui.consent import run as tui_consent
+        cfg = tui_consent(cfg)
+        config.save(cfg)
+        if cfg.get("token"):
+            cfg["_pending_research_sync"] = True
+            config.save(cfg)
+            from methodproof.sync import sync_research_consent
+            sync_research_consent(cfg["token"], cfg["api_url"])
+        return
+    # Classic flow
     print(f"\n{_banner()}\n")
     cfg = _run_consent_detailed(cfg)
     config.save(cfg)
@@ -1154,6 +1230,15 @@ def cmd_start(args: argparse.Namespace) -> None:
                     print("Extension: not detected — run `mp extension pair` or install from store")
             except Exception as exc:
                 print(f"Extension: not detected ({exc})")
+        if _resolve_ui(args, cfg):
+            try:
+                _tui_guard()
+                session = store.get_session(sid)
+                from methodproof.tui.start import run as tui_start
+                tui_start(sid, session)
+                return
+            except SystemExit:
+                pass  # textual not installed — fall through to plain message
         print("Run `mp stop` to finish.")
         return
 
@@ -1294,6 +1379,20 @@ def cmd_view(args: argparse.Namespace) -> None:
 
 
 def cmd_log(args: argparse.Namespace) -> None:
+    cfg = config.load()
+    if _resolve_ui(args, cfg):
+        _tui_guard()
+        from methodproof.tui.log import run as tui_log
+        result = tui_log()
+        if result:
+            action, sid = result
+            import argparse as _ap
+            fake = _ap.Namespace(session_id=sid, local=False)
+            if action == "push":
+                cmd_push(fake)
+            elif action == "view":
+                cmd_view(fake)
+        return
     sessions = store.list_sessions()
     if not sessions:
         print("No sessions yet.")
@@ -1318,8 +1417,13 @@ def cmd_log(args: argparse.Namespace) -> None:
 
 def cmd_status(args: argparse.Namespace) -> None:
     """Show auth, session, and config status at a glance."""
-    from methodproof import __version__
     cfg = config.load()
+    if _resolve_ui(args, cfg):
+        _tui_guard()
+        from methodproof.tui.status import run as tui_status
+        tui_status(cfg)
+        return
+    from methodproof import __version__
     token = cfg.get("token", "")
     claims = _decode_jwt_claims(token) if token else {}
     sessions = store.list_sessions()
@@ -1663,7 +1767,13 @@ def cmd_delete(args: argparse.Namespace) -> None:
 
 def cmd_review(args: argparse.Namespace) -> None:
     """Show exactly what a session contains before pushing."""
+    cfg = config.load()
     session = _resolve_session(args.session_id)
+    if _resolve_ui(args, cfg):
+        _tui_guard()
+        from methodproof.tui.review import run as tui_review
+        tui_review(session)
+        return
     events = store.get_events(session["id"])
     if not events:
         print("No events in this session.")
@@ -1979,11 +2089,14 @@ def main() -> None:
     s.add_argument("--no-e2e", action="store_true", help="Disable E2E for this session (overrides config)")
     s.add_argument("--verbose", "-v", action="store_true", help="Debug logging at each step (still daemonizes)")
     s.add_argument("--streaming", action="store_true", help="Blocking foreground — stream every captured event to stdout")
+    _add_ui_flags(s)
     sub.add_parser("stop", help="Stop recording")
     v = sub.add_parser("view", help="Inspect captured session data")
     v.add_argument("session_id", nargs="?")
-    sub.add_parser("log", help="List sessions")
-    sub.add_parser("status", help="Auth, session, and config status")
+    l_log = sub.add_parser("log", help="List sessions")
+    _add_ui_flags(l_log)
+    s_status = sub.add_parser("status", help="Auth, session, and config status")
+    _add_ui_flags(s_status)
     l = sub.add_parser("login", help="Connect to platform")
     l.add_argument("--api-url")
     l.add_argument("--force", "-f", action="store_true", help="Skip switch-account prompt")
@@ -2005,7 +2118,14 @@ def main() -> None:
     dl.add_argument("--force", "-f", action="store_true", help="Skip confirmation")
     rv = sub.add_parser("review", help="Review session data before pushing")
     rv.add_argument("session_id", nargs="?")
-    sub.add_parser("consent", help="Change capture, research, and redaction settings")
+    _add_ui_flags(rv)
+    c_consent = sub.add_parser("consent", help="Change capture, research, and redaction settings")
+    _add_ui_flags(c_consent)
+    ui_p = sub.add_parser("ui", help="Toggle TUI mode on/off")
+    ui_sub = ui_p.add_subparsers(dest="ui_cmd")
+    ui_sub.add_parser("on", help="Enable TUI mode")
+    ui_sub.add_parser("off", help="Disable TUI mode (classic output)")
+    ui_sub.add_parser("status", help="Show TUI mode and library status")
     up = sub.add_parser("update", help="Update to the latest version from PyPI")
     up_auto = up.add_mutually_exclusive_group()
     up_auto.add_argument("--auto", dest="auto", action="store_true", default=None,
@@ -2062,6 +2182,7 @@ def main() -> None:
         "intro": lambda _: _print_intro(),
         "help": lambda _: _print_commands(),
         "shell-hook": cmd_shell_hook,
+        "ui": cmd_ui,
         "mcp-serve": cmd_mcp_serve,
         "proxy": lambda a: __import__("methodproof.proxy", fromlist=["cmd_proxy"]).cmd_proxy(a),
     }

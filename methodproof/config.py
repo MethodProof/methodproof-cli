@@ -51,6 +51,7 @@ _DEFAULTS: dict[str, Any] = {
         "code_capture": True,
     },
     "profiles": {},
+    "ui_mode": True,
 }
 
 FREE_JOURNAL_MAX_HOURS = 4
