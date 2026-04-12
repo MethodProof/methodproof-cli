@@ -93,9 +93,8 @@ JOURNAL_CONTENT_FIELDS: list[tuple[str, str]] = [
     ("agent_tool_dispatch", "tool_input_preview"),
     ("agent_tool_result", "result_preview"),
     ("agent_skill_invoke", "skill_input_preview"),
-    # Terminal — full command output
+    # Terminal — full command output (command itself is structural, not gated)
     ("terminal_cmd", "output_snippet"),
-    ("terminal_cmd", "command"),
     # Code — full diffs and commit messages
     ("file_edit", "diff"),
     ("git_commit", "diff"),

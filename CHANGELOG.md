@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.31] — 2026-04-12
+
+### Fixed
+- **`mp push` rejected terminal events** — `command` field was in `JOURNAL_CONTENT_FIELDS`, so it was stripped when journal mode was off. Platform requires `command` on `terminal_cmd` events. Removed from journal gate — the command string is structural metadata (sensitive commands are already dropped by the `SENSITIVE` regex).
+
 ## [0.7.30] — 2026-04-12
 
 ### Changed
