@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.32] — 2026-04-12
+
+### Fixed
+- **`mp start` no longer hard-fails on missing shell hook** — instead of `ERROR: Run methodproof init first` + exit, `mp start` now auto-installs the hook and continues. Prints a note that terminal capture won't work until the shell is restarted. Prevents the frustrating dead-end where auto-update + missing hook blocks the entire session.
+
 ## [0.7.31] — 2026-04-12
 
 ### Fixed

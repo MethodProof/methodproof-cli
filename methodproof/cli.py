@@ -1111,8 +1111,10 @@ def cmd_start(args: argparse.Namespace) -> None:
 
     _log_step("Checking hooks")
     if not hook.is_installed():
-        print("ERROR: Run `methodproof init` first.")
-        sys.exit(1)
+        rc = hook.install()
+        print(f"  Shell hook installed ({rc}). Restart your shell or run:")
+        print(f"    eval \"$(methodproof shell-hook)\"")
+        print(f"  Terminal command capture won't work until the hook is active.")
 
     _log_step("Authenticating")
     account_id = _require_auth(cfg)
