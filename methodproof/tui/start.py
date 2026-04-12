@@ -128,7 +128,8 @@ class StartApp(App[None]):
             return
         try:
             events = store.get_session_events(self._session_id, after_id=self._last_seen_id)
-        except Exception:
+        except Exception as exc:
+            self.log.warning(f"poll_events failed: {exc}")
             return
 
         feed = self.query_one(RichLog)

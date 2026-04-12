@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.24] — 2026-04-12
+
+### Fixed
+- **TUI event feed was always empty** — `_poll_events` called `store.get_session_events` which did not exist; `except Exception: return` silently swallowed the `AttributeError`. Added `get_session_events(session_id, after_id="")` to store — uses SQLite `rowid` for monotonic pagination so the TUI feed populates in real time. Also surfaced poll errors to the Textual log instead of swallowing them.
+
 ## [0.7.23] — 2026-04-12
 
 ### Fixed

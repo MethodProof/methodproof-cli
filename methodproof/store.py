@@ -247,6 +247,27 @@ def get_events(session_id: str) -> list[dict[str, Any]]:
     return result
 
 
+def get_session_events(session_id: str, after_id: str = "") -> list[dict[str, Any]]:
+    """Return events for session, optionally after a given event ID (for TUI polling)."""
+    db = _db()
+    if after_id:
+        row = db.execute("SELECT rowid FROM events WHERE id = ?", (after_id,)).fetchone()
+        after_rowid = row[0] if row else 0
+    else:
+        after_rowid = 0
+    rows = db.execute(
+        "SELECT rowid, * FROM events WHERE session_id = ? AND rowid > ? ORDER BY rowid",
+        (session_id, after_rowid),
+    ).fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["ts"] = d.pop("timestamp", 0)
+        d["metadata"] = _decompress_meta(d["metadata"])
+        result.append(d)
+    return result
+
+
 def get_graph(session_id: str) -> dict[str, Any]:
     """Build GraphResponse-compatible dict from SQLite."""
     events = get_events(session_id)
