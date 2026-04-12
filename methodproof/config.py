@@ -118,6 +118,9 @@ JOURNAL_CONTENT_FIELDS: list[tuple[str, str]] = [
     ("user_prompt", "prompt_text"),
     ("tool_call", "tool_input_preview"),
     ("tool_result", "result_preview"),
+    # Agent final message and commit body reveal content
+    ("agent_complete", "last_message_preview"),
+    ("git_commit", "body"),
 ]
 
 

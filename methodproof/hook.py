@@ -10,10 +10,11 @@ _BASH = '''
 # methodproof-hook
 _mp_pre() { _MP_CMD="$BASH_COMMAND"; _MP_T=$SECONDS; }
 _mp_post() {
-  local ec=$? cmd="$_MP_CMD" dur=$(( (SECONDS - ${_MP_T:-$SECONDS}) * 1000 ))
+  local ec=$? cmd="$_MP_CMD" dur=$(( (SECONDS - ${_MP_T:-$SECONDS}) * 1000 )) cwd
   [ -z "$cmd" ] && return
   cmd="${cmd//\\\\/\\\\\\\\}"; cmd="${cmd//\\"/\\\\\\"}"
-  echo "{\\"command\\":\\"$cmd\\",\\"exit_code\\":$ec,\\"duration_ms\\":$dur}" >> ~/.methodproof/commands.jsonl
+  cwd="$(pwd)"; cwd="${cwd//\\\\/\\\\\\\\}"; cwd="${cwd//\\"/\\\\\\"}"
+  echo "{\\"command\\":\\"$cmd\\",\\"exit_code\\":$ec,\\"duration_ms\\":$dur,\\"cwd\\":\\"$cwd\\"}" >> ~/.methodproof/commands.jsonl
   unset _MP_CMD
 }
 trap '_mp_pre' DEBUG
@@ -24,10 +25,11 @@ _ZSH = '''
 # methodproof-hook
 _mp_pre() { _MP_CMD="$1"; _MP_T=$SECONDS; }
 _mp_post() {
-  local ec=$? cmd="$_MP_CMD" dur=$(( (SECONDS - ${_MP_T:-$SECONDS}) * 1000 ))
+  local ec=$? cmd="$_MP_CMD" dur=$(( (SECONDS - ${_MP_T:-$SECONDS}) * 1000 )) cwd
   [[ -z "$cmd" ]] && return
   cmd="${cmd//\\\\/\\\\\\\\}"; cmd="${cmd//\\"/\\\\\\"}"
-  echo "{\\"command\\":\\"$cmd\\",\\"exit_code\\":$ec,\\"duration_ms\\":$dur}" >> ~/.methodproof/commands.jsonl
+  cwd="$(pwd)"; cwd="${cwd//\\\\/\\\\\\\\}"; cwd="${cwd//\\"/\\\\\\"}"
+  echo "{\\"command\\":\\"$cmd\\",\\"exit_code\\":$ec,\\"duration_ms\\":$dur,\\"cwd\\":\\"$cwd\\"}" >> ~/.methodproof/commands.jsonl
   unset _MP_CMD
 }
 autoload -Uz add-zsh-hook
@@ -52,7 +54,8 @@ function prompt {
     if ($global:_mpCmd) {
         $dur = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $global:_mpT
         $cmd = $global:_mpCmd -replace '\\\\','\\\\\\\\' -replace '"','\\"'
-        $line = "{`"command`":`"$cmd`",`"exit_code`":$ec,`"duration_ms`":$dur}"
+        $cwd = (Get-Location).Path -replace '\\\\','\\\\\\\\' -replace '"','\\"'
+        $line = "{`"command`":`"$cmd`",`"exit_code`":$ec,`"duration_ms`":$dur,`"cwd`":`"$cwd`"}"
         $logPath = Join-Path $HOME ".methodproof" "commands.jsonl"
         Add-Content -Path $logPath -Value $line
         $global:_mpCmd = $null

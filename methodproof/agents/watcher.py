@@ -139,7 +139,8 @@ class _Handler(FileSystemEventHandler):
             return
         path = self._relpath(event.src_path)
         self._hashes.pop(path, None)
-        base.emit("file_delete", {"path": path})
+        lang = Path(event.src_path).suffix.lstrip(".")
+        base.emit("file_delete", {"path": path, "language": lang})
 
 
 def _poll_git(watch_dir: str, stop: threading.Event) -> None:
@@ -164,17 +165,33 @@ def _poll_git(watch_dir: str, stop: threading.Event) -> None:
 
 def _log_commit(watch_dir: str, sha: str) -> None:
     try:
-        msg = subprocess.run(
-            ["git", "-C", watch_dir, "log", "-1", "--format=%s", sha],
+        # Single git call: subject\x00author\x00email\x00iso_date\x00parent_hash\x00full_body
+        fmt = subprocess.run(
+            ["git", "-C", watch_dir, "log", "-1",
+             "--format=%s%x00%an%x00%ae%x00%ai%x00%P%x00%B", sha],
             capture_output=True, text=True, timeout=5,
-        ).stdout.strip()
+        ).stdout
+        parts = fmt.split("\x00", 5)
+        subject = parts[0].strip() if len(parts) > 0 else ""
+        author = parts[1].strip() if len(parts) > 1 else ""
+        author_email = parts[2].strip() if len(parts) > 2 else ""
+        committed_at = parts[3].strip() if len(parts) > 3 else ""
+        parent_hash = parts[4].strip()[:7] if len(parts) > 4 else ""
+        body = parts[5].strip() if len(parts) > 5 else ""
         files = subprocess.run(
             ["git", "-C", watch_dir, "diff-tree", "--no-commit-id", "-r", "--name-only", sha],
             capture_output=True, text=True, timeout=5,
         ).stdout.strip().splitlines()
     except Exception:
-        msg, files = "", []
-    meta: dict[str, object] = {"hash": sha[:7], "message": msg, "files_changed": files}
+        subject, author, author_email, committed_at, parent_hash, body, files = "", "", "", "", "", "", []
+    meta: dict[str, object] = {
+        "hash": sha[:7], "message": subject, "files_changed": files,
+        "author": author, "author_email": author_email, "committed_at": committed_at,
+    }
+    if parent_hash:
+        meta["parent_hash"] = parent_hash
+    if body and body != subject:
+        meta["body"] = body[:2000]
     diff = _git_show_diff(watch_dir, sha)
     if diff:
         meta["diff"] = diff

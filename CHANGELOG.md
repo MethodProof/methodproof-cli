@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.28] — 2026-04-12
+
+### Added
+- **`cwd` in terminal events** — shell hook (bash/zsh/PowerShell) now writes working directory to `commands.jsonl`; terminal agent reads it into `terminal_cmd` metadata. Requires re-running `mp init` to update the installed hook.
+- **Git commit enrichment** — `git_commit` events now include `author`, `author_email`, `committed_at` (ISO 8601), `parent_hash`, and `body` (full commit message body when it differs from subject). Single `git log` call instead of multiple.
+- **`language` on `file_delete`** — was always empty string; now extracted from file extension same as `file_create`.
+- **`skipped` count in `test_run`** — pytest, jest, and go test output now parsed for skipped test count.
+
+### Fixed
+- **`agent_complete.last_message_preview` not journal-gated** — preview of agent's final message leaked content when journal mode was off. Now stripped with other content fields.
+- **`git_commit.body` not journal-gated** — full commit body (multi-line messages) added to journal gate.
+
 ## [0.7.27] — 2026-04-12
 
 ### Fixed

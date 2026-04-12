@@ -22,8 +22,8 @@ TEST_FRAMEWORKS = {
     "cargo_test": re.compile(r"\bcargo test\b"),
 }
 
-_PYTEST_RE = re.compile(r"(\d+) passed(?:.*?(\d+) failed)?")
-_JEST_RE = re.compile(r"Tests:\s+(?:(\d+) failed,\s+)?(\d+) passed")
+_PYTEST_RE = re.compile(r"(\d+) passed(?:.*?(\d+) failed)?(?:.*?(\d+) skipped)?")
+_JEST_RE = re.compile(r"Tests:\s+(?:(\d+) failed,\s+)?(\d+) passed(?:,\s+(\d+) skipped)?")
 _CARGO_RE = re.compile(r"(\d+) passed.*?(\d+) failed")
 
 
@@ -34,26 +34,25 @@ def _detect_test(command: str) -> str | None:
     return None
 
 
-def _parse_test_results(output: str, framework: str, exit_code: int) -> tuple[int, int]:
-    """Extract pass/fail counts from test output. Falls back to exit code heuristic."""
+def _parse_test_results(output: str, framework: str, exit_code: int) -> tuple[int, int, int]:
+    """Extract pass/fail/skipped counts from test output. Falls back to exit code heuristic."""
     if framework == "pytest":
         m = _PYTEST_RE.search(output)
         if m:
-            return int(m.group(1)), int(m.group(2) or 0)
+            return int(m.group(1)), int(m.group(2) or 0), int(m.group(3) or 0)
     elif framework == "jest":
         m = _JEST_RE.search(output)
         if m:
-            return int(m.group(2) or 0), int(m.group(1) or 0)
+            return int(m.group(2) or 0), int(m.group(1) or 0), int(m.group(3) or 0)
     elif framework == "go_test":
-        return output.count("--- PASS"), output.count("--- FAIL")
+        return output.count("--- PASS"), output.count("--- FAIL"), output.count("--- SKIP")
     elif framework == "cargo_test":
         m = _CARGO_RE.search(output)
         if m:
-            return int(m.group(1)), int(m.group(2))
-    # Fallback: exit code 0 = all passed, non-zero = at least 1 failure
+            return int(m.group(1)), int(m.group(2)), 0
     if exit_code == 0:
-        return 1, 0
-    return 0, 1
+        return 1, 0, 0
+    return 0, 1, 0
 
 
 def start(stop: threading.Event) -> None:
@@ -93,19 +92,22 @@ def _process(line: str) -> None:
     exit_code = entry.get("exit_code", 0)
     duration = entry.get("duration_ms", 0)
     output = entry.get("output", "")[:500]
-    # Redact output if it contains secrets
     if SENSITIVE.search(output):
         output = "[redacted — contains sensitive content]"
+    cwd = entry.get("cwd", "")
 
-    base.emit("terminal_cmd", {
+    meta: dict = {
         "command": command, "exit_code": exit_code,
         "output_snippet": output, "duration_ms": duration,
-    })
+    }
+    if cwd:
+        meta["cwd"] = cwd
+    base.emit("terminal_cmd", meta)
 
     framework = _detect_test(command)
     if framework:
-        passed, failed = _parse_test_results(output, framework, exit_code)
+        passed, failed, skipped = _parse_test_results(output, framework, exit_code)
         base.emit("test_run", {
             "framework": framework, "passed": passed, "failed": failed,
-            "duration_ms": duration,
+            "skipped": skipped, "duration_ms": duration,
         })
