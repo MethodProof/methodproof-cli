@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.25] — 2026-04-12
+
+### Fixed
+- **TUI event metadata never rendered** — `_fmt_meta` read fields like `path`, `command`, `message` from the top-level event dict, but they live inside the `metadata` sub-dict. All event-type formatters now read from `ev["metadata"]`.
+- **Tier hardcoded as "Pro" in session bar** — decoded from JWT on mount; now shows actual account type (Free / Basic / Pro / Team).
+- **Unused `Worker`/`WorkerState` imports** removed from `tui/start.py`.
+
 ## [0.7.24] — 2026-04-12
 
 ### Fixed

@@ -1,6 +1,7 @@
 """Textual TUI for mp start — live session event feed."""
 from __future__ import annotations
 
+import json
 import time
 from datetime import datetime, UTC
 
@@ -9,9 +10,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import Footer, Header, RichLog, Static
-from textual.worker import Worker, WorkerState
-
-from methodproof import store
+from methodproof import config, store
 from methodproof.tui.theme import BASE_CSS, BORDER, DIM, GOLD, GREEN, PURPLE, RED, TEXT
 
 _CSS = BASE_CSS + f"""
@@ -94,7 +93,7 @@ class StartApp(App[None]):
         watch_dir = self._session.get("watch_dir", "?")
         sid = self._session_id[:8]
         yield Static(
-            f"  session: [{GOLD}]{sid}[/{GOLD}]  ·  {watch_dir}  ·  [{GREEN}]●[/{GREEN}]  00:00:00  ·  [{PURPLE}]Pro[/{PURPLE}]",
+            f"  session: [{GOLD}]{sid}[/{GOLD}]  ·  {watch_dir}  ·  [{GREEN}]●[/{GREEN}]  00:00:00",
             id="session-bar",
             markup=True,
         )
@@ -108,6 +107,15 @@ class StartApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        import base64
+        cfg = config.load()
+        token = cfg.get("token", "")
+        try:
+            payload = token.split(".")[1] + "=="
+            claims = json.loads(base64.urlsafe_b64decode(payload))
+        except Exception:
+            claims = {}
+        self._account_type = (claims.get("account_type") or "free").capitalize()
         self.set_interval(_POLL_INTERVAL, self._poll_events)
         self.set_interval(1.0, self._tick_timer)
 
@@ -120,7 +128,7 @@ class StartApp(App[None]):
         watch_dir = self._session.get("watch_dir", "?")
         self.query_one("#session-bar", Static).update(
             f"  session: [{GOLD}]{sid}[/{GOLD}]  ·  {watch_dir}  ·  [{GREEN}]●[/{GREEN}]"
-            f"  {h:02d}:{m:02d}:{s:02d}  ·  [{PURPLE}]Pro[/{PURPLE}]"
+            f"  {h:02d}:{m:02d}:{s:02d}  ·  [{PURPLE}]{self._account_type}[/{PURPLE}]"
         )
 
     def _poll_events(self) -> None:
@@ -173,25 +181,28 @@ class StartApp(App[None]):
 
 def _fmt_meta(ev: dict) -> str:
     etype = ev.get("type", "")
+    meta = ev.get("metadata") or {}
+    if not isinstance(meta, dict):
+        meta = {}
     if etype in ("file_edit", "file_create", "file_delete"):
-        path = ev.get("path") or ev.get("file_path", "")
-        delta = ev.get("line_delta") or ev.get("lines_added", "")
-        return f"{path}  {f'+{delta}' if delta else ''}"
+        path = meta.get("path") or meta.get("file_path", "")
+        delta = meta.get("line_delta") or meta.get("lines_added", "")
+        return f"{path}  {f'+{delta}' if delta else ''}".strip()
     if etype == "terminal_cmd":
-        cmd = ev.get("command", "")[:40]
-        ec = ev.get("exit_code", 0)
+        cmd = (meta.get("command") or "")[:40]
+        ec = meta.get("exit_code", 0)
         return f"{cmd}  {'✓' if ec == 0 else f'✗{ec}'}"
     if etype == "git_commit":
-        return (ev.get("message") or "")[:40]
+        return (meta.get("message") or "")[:40]
     if etype in ("llm_prompt", "agent_prompt"):
-        tokens = ev.get("prompt_tokens") or ev.get("input_length", "")
+        tokens = meta.get("prompt_tokens") or meta.get("input_length", "")
         return f"{tokens} tokens" if tokens else ""
     if etype in ("llm_completion", "agent_completion"):
-        tokens = ev.get("completion_tokens") or ev.get("output_length", "")
+        tokens = meta.get("completion_tokens") or meta.get("output_length", "")
         dur = ev.get("duration_ms", "")
         return f"{tokens} tokens  {dur}ms" if tokens else ""
     if etype == "test_run":
-        p, f = ev.get("passed", 0), ev.get("failed", 0)
+        p, f = meta.get("passed", 0), meta.get("failed", 0)
         return f"{p} passed  {f} failed" if f else f"{p} passed"
     return ""
 
