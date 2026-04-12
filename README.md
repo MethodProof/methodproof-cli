@@ -71,9 +71,10 @@ methodproof view      # explore your session in the browser
 | `enter` | Event detail | Modal overlay with all metadata fields |
 | `m` | Quiet mode | Hide dim events (music, environment, MCP, context compaction) |
 | `p` | Pause | Pause/resume event polling |
-| `q` | Stop | Stop the session |
+| `q` | Exit TUI | Detach — daemon keeps recording. Reconnect with `mp connect` |
+| `x` | End session | Stop recording with confirmation prompt |
 
-Active modes display as badges in the session bar: `J` (journal), `⏸` (scroll locked), `Q` (quiet), `T` (tree collapsed), filter name when not "all".
+Active modes display as badges in the session bar: `J` (journal), `⏸` (scroll locked), `Q` (quiet), `T` (tree collapsed), filter name when not "all". Source tracking shows which AI tool session (`claude #1`, `codex #2`) generated each event.
 
 ## Security Architecture
 
@@ -161,8 +162,9 @@ flowchart TB
 | Command | What it does |
 |---------|-------------|
 | `init` | Interactive consent selector, install hooks, create data directory |
-| `start [--dir .] [--tags t1,t2] [--public] [--live] [--journal] [--e2e]` | Start recording |
+| `start [--dir .] [--tags t1,t2] [--public] [--live] [--journal] [--e2e]` | Start recording (auto-connects if session already active) |
 | `stop` | Stop recording, build process graph |
+| `connect [session_id]` | Attach TUI to an active session (defaults to current) |
 | `view [session_id]` | Open session graph in browser |
 | `log` | List sessions with sync status, visibility, tags |
 | `login [--api-url URL]` | Authenticate with the platform |
