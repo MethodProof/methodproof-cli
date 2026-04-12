@@ -118,9 +118,10 @@ def test_start_creates_session_and_spawns_daemon(mock_sleep, mock_popen, mock_re
 @patch("subprocess.Popen")
 @patch("time.sleep")
 def test_start_journal_decrements_credits(mock_sleep, mock_popen, mock_req, mock_repo, mock_update, mock_auth,
-                                           mock_hook, mock_alive, logged_in_cfg, cli_args,
+                                           mock_hook, mock_alive, logged_in_cfg, fake_jwt, cli_args,
                                            monkeypatch, capsys):
-    cfg = logged_in_cfg(account_id="acct-1")
+    # Use free-tier JWT — pro/team skips credit deduction (unlimited)
+    cfg = logged_in_cfg(account_id="acct-1", token=fake_jwt(user_id="acct-1", account_type="free"))
     cfg["journal_credits"] = 2
     config.save(cfg)
     pidfile = config.DIR / "methodproof.pid"

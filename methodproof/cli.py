@@ -156,13 +156,50 @@ def _install_alias() -> None:
         f.write(alias)
 
 
-def _print_journal_intro(credits: int) -> None:
-    """Show journal mode introduction with remaining credits."""
+_PRO_TIERS = {"pro", "team", "admin", "superadmin"}
+
+
+def _journal_entitlement(cfg: dict) -> str | int:
+    """Return 'unlimited' for Pro+ users, or an int credit count for others.
+
+    For Basic users, fetches live credit count from the platform; falls back
+    to the locally cached value if the request fails (e.g. offline).
+    """
+    token = cfg.get("token", "")
+    claims = _decode_jwt_claims(token) if token else {}
+    account_type = claims.get("account_type", "free").lower()
+
+    if account_type in _PRO_TIERS:
+        return "unlimited"
+
+    if account_type == "basic":
+        try:
+            profile = _request("GET", "/auth/me", cfg.get("api_url", config.LOCAL_API_URL), token)
+            server_credits = profile.get("journal_credits")
+            if server_credits is not None:
+                cfg["journal_credits"] = int(server_credits)
+                config.save(cfg)
+        except Exception:
+            pass  # offline — use local cache
+
+    return int(cfg.get("journal_credits", 0))
+
+
+def _journal_credits_line(entitlement: str | int) -> str:
+    if entitlement == "unlimited":
+        return "Unlimited journal entries (Pro plan)"
+    n = int(entitlement)
+    label = f"{n} free journal credit{'s' if n != 1 else ''}"
+    return f"{label} (up to {config.FREE_JOURNAL_MAX_HOURS}h per session)"
+
+
+def _print_journal_intro(cfg: dict) -> None:
+    """Show journal mode introduction with tier-aware credit status."""
+    entitlement = _journal_entitlement(cfg)
     print("  ┌─────────────────────────────────────────────────────┐")
     print("  │  Journal Mode — full content capture                │")
     print("  └─────────────────────────────────────────────────────┘")
-    print(f"  You have {credits} free journal credit{'s' if credits != 1 else ''} "
-          f"(sessions up to {config.FREE_JOURNAL_MAX_HOURS}h each).")
+    print(f"  {_journal_credits_line(entitlement)}")
     print()
     print("  By default, MethodProof captures structural metadata only —")
     print("  file paths, line counts, timing, tool names. Journal mode")
@@ -199,9 +236,8 @@ def _run_consent(cfg: dict) -> dict:
         cfg["research_consent"] = False
         cfg["publish_redact"] = dict(config._DEFAULTS["publish_redact"])
         cfg["consent_acknowledged"] = True
-        credits = cfg.get("journal_credits", config._DEFAULTS["journal_credits"])
         print("\n  Minimal capture enabled (file changes + git commits).\n")
-        _print_journal_intro(credits)
+        _print_journal_intro(cfg)
         print("  Customize anytime: `methodproof consent`\n")
         return cfg
 
@@ -210,9 +246,8 @@ def _run_consent(cfg: dict) -> dict:
     cfg["research_consent"] = False
     cfg["publish_redact"] = dict(config._DEFAULTS["publish_redact"])
     cfg["consent_acknowledged"] = True
-    credits = cfg.get("journal_credits", config._DEFAULTS["journal_credits"])
     print(f"\n  {_rainbow('Full Spectrum')} enabled — free live streaming unlocked.\n")
-    _print_journal_intro(credits)
+    _print_journal_intro(cfg)
     print("  Customize anytime: `methodproof consent`\n")
     return cfg
 
@@ -873,7 +908,8 @@ def cmd_journal(args: argparse.Namespace) -> None:
     """Journal mode — full content capture."""
     subcmd = getattr(args, "journal_cmd", None)
     cfg = config.load()
-    credits = cfg.get("journal_credits", 0)
+    entitlement = _journal_entitlement(cfg)
+    is_unlimited = entitlement == "unlimited"
 
     if subcmd == "on":
         print("Journal Mode — Full Content Capture\n")
@@ -884,12 +920,9 @@ def cmd_journal(args: argparse.Namespace) -> None:
         print("  • Terminal output (not just commands)")
         print("  • Tool call parameters and results\n")
         print("All content is encrypted (AES-256-GCM) and subject to your consent settings.\n")
-        if credits > 0:
-            print(f"You have {credits} free journal credit{'s' if credits != 1 else ''} "
-                  f"(sessions up to {config.FREE_JOURNAL_MAX_HOURS}h each).")
-            print("After credits are used, journal mode requires a Pro plan.\n")
-        else:
-            print("Journal mode requires a Pro plan (or free credits if available).\n")
+        print(f"  {_journal_credits_line(entitlement)}\n")
+        if not is_unlimited and int(entitlement) == 0:
+            print("You have no credits remaining. Upgrade to Pro for unlimited journal entries.\n")
         answer = input("Enable journal mode? [y/N] ").strip().lower()
         if answer != "y":
             print("Journal mode not enabled.")
@@ -913,9 +946,7 @@ def cmd_journal(args: argparse.Namespace) -> None:
             print("Journal mode: OFF (structural only)")
             print("  Only metadata captured: lengths, types, timing, file paths.")
             print("  Enable with: methodproof journal on")
-        if credits > 0:
-            print(f"  Free journal credits: {credits} "
-                  f"(up to {config.FREE_JOURNAL_MAX_HOURS}h per session)")
+        print(f"  {_journal_credits_line(entitlement)}")
 
     else:
         print("Usage: methodproof journal [on|off|status]")
@@ -1196,12 +1227,17 @@ def cmd_start(args: argparse.Namespace) -> None:
     # Journal mode
     if getattr(args, "journal", False):
         cfg["journal_mode"] = True
-        credits = cfg.get("journal_credits", 0)
-        if credits > 0:
-            cfg["journal_credits"] = credits - 1
-            print(f"Journal mode ON (free credit used — {credits - 1} remaining, {config.FREE_JOURNAL_MAX_HOURS}h cap).")
+        entitlement = _journal_entitlement(cfg)
+        if entitlement == "unlimited":
+            print("Journal mode ON (full content capture).")
         else:
-            print("Journal mode ON for this session (full content capture).")
+            credits = int(entitlement)
+            if credits > 0:
+                cfg["journal_credits"] = credits - 1
+                remaining = credits - 1
+                print(f"Journal mode ON (free credit used — {remaining} remaining, {config.FREE_JOURNAL_MAX_HOURS}h cap).")
+            else:
+                print("Journal mode ON for this session (full content capture).")
         config.save(cfg)
 
     # E2E mode
@@ -1558,8 +1594,8 @@ def cmd_status(args: argparse.Namespace) -> None:
     # Modes
     modes = []
     if cfg.get("journal_mode"):
-        credits = cfg.get("journal_credits", 0)
-        modes.append(f"journal ({credits} credits)")
+        ent = _journal_entitlement(cfg)
+        modes.append("journal (unlimited)" if ent == "unlimited" else f"journal ({ent} credits)")
     if cfg.get("e2e_mode"):
         fp = cfg.get("e2e_fingerprint", "")
         modes.append(f"e2e ({fp[:8]})" if fp else "e2e")

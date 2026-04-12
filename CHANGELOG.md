@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.29] — 2026-04-12
+
+### Changed
+- **Journal mode output is now tier-aware** — Pro/Team/Admin/Superadmin users see "Unlimited journal entries (Pro plan)" everywhere journal credits are displayed (`mp journal on`, `mp journal status`, `mp start --journal`, session mode line, consent flow). Basic users get a live credit count fetched from `GET /auth/me` (falls back to local cache if offline). Free users see their local credit count as before. Credit deduction on `--journal` is skipped for unlimited tiers.
+
 ## [0.7.28] — 2026-04-12
 
 ### Added
