@@ -48,7 +48,11 @@ _CODEX_EVENTS = ["PreToolUse", "PostToolUse", "UserPromptSubmit", "SessionStart"
 # --- Gemini CLI ---
 _GEMINI_DIR = Path.home() / ".gemini"
 _GEMINI_HOOK = _HOOKS_DIR / "gemini_hook.sh"
-_GEMINI_EVENTS = ["BeforeTool", "AfterTool", "SessionStart", "SessionEnd"]
+_GEMINI_EVENTS = [
+    "BeforeTool", "AfterTool", "BeforeAgent", "AfterAgent",
+    "BeforeModel", "AfterModel", "SessionStart", "SessionEnd",
+    "PreCompress", "Notification",
+]
 
 # --- Kiro ---
 _KIRO_DIR = Path.home() / ".kiro"

@@ -1,7 +1,10 @@
 #!/bin/sh
-# MethodProof hook for Gemini CLI — captures tool calls and sessions.
+# MethodProof hook for Gemini CLI — captures prompts, tools, model calls, sessions.
 # Receives JSON on stdin. Posts to local bridge. Fails silently.
 # Must complete in <1s to avoid blocking Gemini.
+
+# Skip if no session is running (no pidfile = no daemon = no bridge)
+[ -f "${HOME}/.methodproof/methodproof.pid" ] || exit 0
 
 INPUT=$(cat)
 
@@ -20,21 +23,83 @@ fi
 
 if command -v jq >/dev/null 2>&1; then
   case "$EVENT" in
+    BeforeAgent)
+      TYPE="user_prompt"
+      META=$(echo "$INPUT" | jq -c '{
+        tool: "gemini",
+        prompt_preview: (.prompt // "" | .[0:200]),
+        prompt_length: (.prompt // "" | length)
+      }' 2>/dev/null || echo '{"tool":"gemini"}')
+      ;;
+    AfterAgent)
+      TYPE="agent_completion"
+      META=$(echo "$INPUT" | jq -c '{
+        tool: "gemini",
+        prompt_preview: (.prompt // "" | .[0:200]),
+        response_preview: (.prompt_response // "" | .[0:200]),
+        response_length: (.prompt_response // "" | length)
+      }' 2>/dev/null || echo '{"tool":"gemini"}')
+      ;;
     BeforeTool)
       TYPE="tool_call"
-      META=$(echo "$INPUT" | jq -c '{tool: "gemini", tool_name: (.tool_name // "unknown")}' 2>/dev/null || echo '{"tool":"gemini"}')
+      META=$(echo "$INPUT" | jq -c '{
+        tool: "gemini",
+        tool_name: (.tool_name // "unknown"),
+        tool_input_preview: (.tool_input // {} | tostring | .[0:200])
+      }' 2>/dev/null || echo '{"tool":"gemini"}')
       ;;
     AfterTool)
       TYPE="tool_result"
-      META=$(echo "$INPUT" | jq -c '{tool: "gemini", tool_name: (.tool_name // "unknown")}' 2>/dev/null || echo '{"tool":"gemini"}')
+      META=$(echo "$INPUT" | jq -c '{
+        tool: "gemini",
+        tool_name: (.tool_name // "unknown"),
+        tool_input_preview: (.tool_input // {} | tostring | .[0:200]),
+        result_preview: (.tool_response // {} | tostring | .[0:200])
+      }' 2>/dev/null || echo '{"tool":"gemini"}')
+      ;;
+    BeforeModel)
+      TYPE="llm_prompt"
+      META=$(echo "$INPUT" | jq -c '{
+        tool: "gemini",
+        model: "gemini"
+      }' 2>/dev/null || echo '{"tool":"gemini","model":"gemini"}')
+      ;;
+    AfterModel)
+      TYPE="llm_completion"
+      META=$(echo "$INPUT" | jq -c '{
+        tool: "gemini",
+        model: "gemini"
+      }' 2>/dev/null || echo '{"tool":"gemini","model":"gemini"}')
       ;;
     SessionStart)
       TYPE="gemini_session_start"
-      META=$(echo "$INPUT" | jq -c '{tool: "gemini", cwd: (.cwd // "")}' 2>/dev/null || echo '{"tool":"gemini"}')
+      META=$(echo "$INPUT" | jq -c '{
+        tool: "gemini",
+        gemini_session_id: (.session_id // ""),
+        cwd: (.cwd // ""),
+        source: (.source // "")
+      }' 2>/dev/null || echo '{"tool":"gemini"}')
       ;;
     SessionEnd)
       TYPE="gemini_session_end"
-      META=$(echo "$INPUT" | jq -c '{tool: "gemini", reason: (.reason // "")}' 2>/dev/null || echo '{"tool":"gemini"}')
+      META=$(echo "$INPUT" | jq -c '{
+        tool: "gemini",
+        gemini_session_id: (.session_id // ""),
+        reason: (.reason // "")
+      }' 2>/dev/null || echo '{"tool":"gemini"}')
+      ;;
+    PreCompress)
+      TYPE="context_compact_start"
+      META='{"tool":"gemini"}'
+      ;;
+    Notification)
+      TYPE="gemini_event"
+      META=$(echo "$INPUT" | jq -c '{
+        tool: "gemini",
+        event: "notification",
+        notification_type: (.notification_type // ""),
+        message: (.message // "" | .[0:200])
+      }' 2>/dev/null || echo '{"tool":"gemini","event":"notification"}')
       ;;
     *)
       TYPE="gemini_event"
