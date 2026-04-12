@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.36] — 2026-04-12
+
+### Added
+- **`mp connect [session_id]`** — attach TUI to an active recording session. Defaults to the current active session. `mp start` with an active session now auto-connects instead of erroring.
+- **Source tracking in TUI** — events display which AI tool session generated them (e.g. `claude`, `codex`). Session bar shows source name and conversation number (`claude #2`). Tracks across multiple AI sessions within one `mp start`.
+- **End session from TUI (`x`)** — confirmation prompt (`y`/`n`) to stop the session and finalize from within the TUI. `q` now exits the TUI without stopping the daemon — reconnect later with `mp connect`.
+
+### Fixed
+- **Tree indentation invisible** — `gold_ember` (`#3d3118`) was near-invisible on dark background; switched to `gold_aged` (`#9a7b3a`).
+- **Orphan tool_call events showed no tree** — `tool_call` after `agent_turn_end`/`agent_complete` fell through to flat rendering. Now implicitly opens a new chain.
+- **`tool_name` field empty in TUI** — hook events store the tool name in `tool` not `tool_name`; formatters now check both fields.
+
 ## [0.7.35] — 2026-04-12
 
 ### Added

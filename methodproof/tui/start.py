@@ -197,6 +197,11 @@ class _TreeTracker:
                 return "├ ", True
             self._in_chain = False
             return "  ", True
+        # Not in chain — tool_call starts one implicitly (orphan after closer)
+        if etype in self._INNERS:
+            self._in_chain = True
+            self._collapse_count = 0
+            return "├ ", True
         return "  ", True
 
 
@@ -255,15 +260,15 @@ def _fmt_meta(ev: dict) -> str:
 
     # Hook lifecycle — tool call / result
     if etype == "tool_call":
-        name = meta.get("tool_name", "")
+        name = meta.get("tool_name") or meta.get("tool", "")
         preview = (meta.get("tool_input_preview") or "")[:60]
         return f"{name}  {preview}".strip()
     if etype == "tool_result":
-        name = meta.get("tool_name", "")
+        name = meta.get("tool_name") or meta.get("tool", "")
         ok = "✓" if meta.get("success", True) else "✗"
         return f"{name}  {ok}"
     if etype == "tool_failure":
-        name = meta.get("tool_name", "")
+        name = meta.get("tool_name") or meta.get("tool", "")
         err = (meta.get("error") or "")[:40]
         return f"{name}  ✗  {err}".strip()
 
@@ -392,14 +397,40 @@ class _DetailScreen(Screen[None]):
         self.app.pop_screen()
 
 
+class _ConfirmEndScreen(Screen[bool]):
+    """Confirm session end."""
+
+    BINDINGS = [
+        Binding("y", "confirm", "yes"),
+        Binding("n", "cancel", "no"),
+        Binding("escape", "cancel", "cancel"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        P = ACTIVE
+        yield Static(
+            f"\n  [{P.red}]End this session?[/{P.red}]\n\n"
+            f"  [{P.dim}]This will stop all capture agents and finalize the session.[/{P.dim}]\n\n"
+            f"  [{P.gold}]y[/{P.gold}] [{P.dim}]confirm[/{P.dim}]    "
+            f"[{P.gold}]n[/{P.gold}] [{P.dim}]cancel[/{P.dim}]",
+        )
+
+    def action_confirm(self) -> None:
+        self.dismiss(True)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
 # ── App ──────────────────────────────────────────────────────────────
-class StartApp(App[None]):
+class StartApp(App[str | None]):
     """Live session view — tails the active session's events."""
 
     TITLE = "methodproof — mp start"
     CSS = _CSS
     BINDINGS = [
-        Binding("q", "stop_session", "stop"),
+        Binding("q", "exit_tui", "exit"),
+        Binding("x", "end_session", "end session"),
         Binding("p", "pause", "pause"),
         Binding("j", "toggle_journal", "journal"),
         Binding("f", "cycle_filter", "filter"),
@@ -438,6 +469,10 @@ class StartApp(App[None]):
         self._last_event_ts: float = 0.0
         self._recent_files: list[str] = []
         self._recent_tools: list[str] = []
+        # Source tracking: which AI tool session is active
+        self._active_source: str = ""  # e.g. "claude", "codex", "gemini"
+        self._source_session_id: str = ""  # short id of the AI session
+        self._source_count: int = 0  # how many AI sessions so far
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -518,10 +553,13 @@ class StartApp(App[None]):
             badge_str = f"  {badge_str}"
 
         ev = f"  {self._event_count} ev" if self._event_count else ""
+        src = ""
+        if self._active_source:
+            src = f"  ·  [{P.purple_muted}]{self._active_source} #{self._source_count}[/{P.purple_muted}]"
         self.query_one("#session-bar", Static).update(
             f"  session: [{P.gold}]{sid}[/{P.gold}]  ·  {watch_dir}"
             f"  ·  [{P.green}]●[/{P.green}]  {h:02d}:{m:02d}:{s:02d}"
-            f"{ev}{badge_str}  ·  [{P.purple}]{self._account_type}[/{P.purple}]"
+            f"{ev}{src}{badge_str}  ·  [{P.purple}]{self._account_type}[/{P.purple}]"
         )
 
     # ── Event poll: Layers B + E + A ─────────────────────────────
@@ -543,6 +581,17 @@ class StartApp(App[None]):
             etype = ev.get("type", "event")
             self._last_event = ev
             ev_ts = ev.get("ts", time.time())
+
+            # Source tracking: detect AI session boundaries
+            if etype.endswith("_session_start"):
+                self._active_source = etype.replace("_session_start", "")
+                ev_meta_src = ev.get("metadata") or {}
+                sid_field = ev_meta_src.get("session_id") or ev_meta_src.get("claude_session_id", "")
+                self._source_session_id = str(sid_field)[:8]
+                self._source_count += 1
+            elif etype.endswith("_session_end"):
+                self._active_source = ""
+                self._source_session_id = ""
 
             # Quiet mode: skip dim events
             if self._quiet_mode and etype in _DIM_TYPES:
@@ -572,7 +621,7 @@ class StartApp(App[None]):
                         self._recent_files.append(path)
                     if len(self._recent_files) > 10:
                         self._recent_files.pop(0)
-                tool = ev_meta.get("tool_name")
+                tool = ev_meta.get("tool_name") or ev_meta.get("tool")
                 if tool and etype in ("tool_call", "tool_result"):
                     if tool not in self._recent_tools:
                         self._recent_tools.append(tool)
@@ -585,16 +634,20 @@ class StartApp(App[None]):
                 self._event_count += 1
                 continue
 
+            # Source tag
+            src_tag = ""
+            if self._active_source:
+                src_tag = f"[{P.purple_muted}]{self._active_source}[/{P.purple_muted}] "
+
             # Search highlight
             line_plain = f"{etype} {meta}"
             if self._search_query and self._search_query.lower() not in line_plain.lower():
-                # Still render but dimmed
                 feed.write(f"[{P.dim}]{ts}  {prefix}{etype:<18} {meta}[/{P.dim}]")
             else:
-                # Layer B + E: structural line with tree prefix
                 feed.write(
                     f"[{P.dim}]{ts}[/{P.dim}] "
-                    f"[{P.gold_ember}]{prefix}[/{P.gold_ember}]"
+                    f"{src_tag}"
+                    f"[{P.gold_aged}]{prefix}[/{P.gold_aged}]"
                     f"[{color}]{etype:<18}[/{color}] "
                     f"[{P.dim}]{meta}[/{P.dim}]"
                 )
@@ -602,7 +655,7 @@ class StartApp(App[None]):
             # Layer A: journal content enrichment
             for jline in _journal_lines(ev, self._journal_mode):
                 feed.write(
-                    f"           [{P.gold_ember}]│[/{P.gold_ember}] "
+                    f"           [{P.gold_aged}]│[/{P.gold_aged}] "
                     f"[{P.dim}]{jline}[/{P.dim}]"
                 )
 
@@ -655,8 +708,18 @@ class StartApp(App[None]):
         self.set_timer(4.0, lambda: alert.remove_class("visible"))
 
     # ── Actions ──────────────────────────────────────────────────
-    def action_stop_session(self) -> None:
+    def action_exit_tui(self) -> None:
+        """Detach TUI — daemon keeps recording."""
         self.exit(None)
+
+    def action_end_session(self) -> None:
+        """End the session (with confirmation)."""
+        self.push_screen(_ConfirmEndScreen(), self._on_confirm_end)
+
+    def _on_confirm_end(self, confirmed: bool) -> None:
+        if not confirmed:
+            return
+        self.exit("end_session")
 
     def action_pause(self) -> None:
         self._paused = not self._paused
@@ -743,6 +806,7 @@ class StartApp(App[None]):
         self._tick_timer()
 
 
-def run(session_id: str, session: dict) -> None:
-    """Launch the live session view for the given session."""
-    StartApp(session_id, session).run()
+def run(session_id: str, session: dict) -> str | None:
+    """Launch the live session view. Returns 'end_session' if user chose to end."""
+    app = StartApp(session_id, session)
+    return app.run()

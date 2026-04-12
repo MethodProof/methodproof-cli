@@ -38,14 +38,17 @@ def test_start_auth_fails(mock_auth, mock_hook, cli_args):
 
 @patch("methodproof.cli._is_daemon_alive", return_value=True)
 @patch("methodproof.hook.is_installed", return_value=True)
-def test_start_session_already_active(mock_hook, mock_alive, logged_in_cfg, cli_args, make_session):
+def test_start_session_already_active(mock_hook, mock_alive, logged_in_cfg, cli_args, make_session, capsys):
     logged_in_cfg()
     sid, _ = make_session()
     cfg = config.load()
     cfg["active_session"] = sid
     config.save(cfg)
-    with pytest.raises(SystemExit):
+    with patch("methodproof.cli.cmd_connect") as mock_connect:
         cli.cmd_start(cli_args())
+        mock_connect.assert_called_once()
+    out = capsys.readouterr().out
+    assert "already active" in out
 
 
 @patch("methodproof.cli._is_daemon_alive", return_value=False)

@@ -1098,9 +1098,11 @@ def cmd_start(args: argparse.Namespace) -> None:
 
     if cfg.get("active_session"):
         if _is_daemon_alive():
-            print(f"Session active: {cfg['active_session'][:8]}")
-            print("Run `methodproof stop` first.")
-            sys.exit(1)
+            sid = cfg["active_session"]
+            print(f"  Session {sid[:8]} already active. Connecting...")
+            args.session_id = None  # connect resolves from config
+            cmd_connect(args)
+            return
         stale_sid = cfg["active_session"]
         _log_step(f"Cleaning stale session {stale_sid[:8]}")
         store.complete_session(stale_sid)
@@ -1301,7 +1303,9 @@ def cmd_start(args: argparse.Namespace) -> None:
         if _resolve_ui(args, cfg):
             session = store.get_session(sid)
             from methodproof.tui.start import run as tui_start
-            tui_start(sid, session)
+            result = tui_start(sid, session)
+            if result == "end_session":
+                cmd_stop(args)
             return
         print("Run `mp stop` to finish.")
         return
@@ -1442,6 +1446,33 @@ def cmd_stop(args: argparse.Namespace) -> None:
     cfg["active_session"] = None
     config.save(cfg)
     _print_summary(session, stats, cfg)
+
+
+def cmd_connect(args: argparse.Namespace) -> None:
+    """Attach TUI to an active recording session."""
+    cfg = config.load()
+    sid = getattr(args, "session_id", None)
+    if sid:
+        # Resolve prefix
+        sessions = store.list_sessions()
+        match = [s for s in sessions if s["id"].startswith(sid)]
+        if not match:
+            print(f"No session matching '{sid}'")
+            sys.exit(1)
+        sid = match[0]["id"]
+    else:
+        sid = cfg.get("active_session")
+    if not sid:
+        print("No active session. Run `mp start` first.")
+        sys.exit(1)
+    session = store.get_session(sid)
+    if not session:
+        print(f"Session {sid[:8]} not found.")
+        sys.exit(1)
+    from methodproof.tui.start import run as tui_start
+    result = tui_start(sid, session)
+    if result == "end_session":
+        cmd_stop(args)
 
 
 def cmd_view(args: argparse.Namespace) -> None:
@@ -1782,18 +1813,51 @@ def cmd_push(args: argparse.Namespace) -> None:
     local = getattr(args, "local", False)
     cfg = config.load(local=local)
     if not cfg.get("token"):
-        target = "local API" if local else "platform"
         print(f"Run `methodproof login{' --api-url http://localhost:8000' if local else ''}` first.")
         sys.exit(1)
     from methodproof.sync import sync_research_consent
     sync_research_consent(cfg["token"], cfg["api_url"])
     cfg = config.load(local=local)
-    sid = args.session_id or _latest()
-    if not sid:
-        print("No sessions to push.")
-        sys.exit(1)
-    from methodproof.sync import push
     force = getattr(args, "force", False)
+
+    if args.session_id:
+        _push_one(args.session_id, cfg, force=force)
+        return
+
+    # No session_id — check for unsynced completed sessions
+    unsynced = [s for s in store.list_sessions()
+                if not s["synced"] and s.get("completed_at")]
+    if not unsynced:
+        # Fall back to latest session
+        sid = _latest()
+        if not sid:
+            print("No sessions to push.")
+            sys.exit(1)
+        _push_one(sid, cfg, force=force)
+        return
+
+    if len(unsynced) == 1:
+        _push_one(unsynced[0]["id"], cfg, force=force)
+        return
+
+    # Multiple unsynced — offer to push all
+    print(f"Found {len(unsynced)} unsynced sessions:\n")
+    for s in unsynced:
+        events = len(store.get_events(s["id"]))
+        date = s["created_at"][:10] if s.get("created_at") else "?"
+        print(f"  {s['id'][:8]}  {date}  {events} events")
+    print()
+    answer = input(f"Push all {len(unsynced)}? [Y/n] ").strip().lower()
+    if answer in ("", "y", "yes"):
+        for s in unsynced:
+            _push_one(s["id"], cfg, force=force)
+            print()
+    else:
+        print("Cancelled. Push individually with `mp push <session_id>`.")
+
+
+def _push_one(sid: str, cfg: dict, force: bool = False) -> None:
+    from methodproof.sync import push
     remote_id = push(sid, cfg["token"], cfg["api_url"], force=force)
     app = _app_url(cfg["api_url"])
     print(f"Pushed {sid[:8]} → {cfg['api_url']} (private).")
@@ -2205,6 +2269,9 @@ def main() -> None:
     s.add_argument("--streaming", action="store_true", help="Blocking foreground — stream every captured event to stdout")
     _add_ui_flags(s)
     sub.add_parser("stop", help="Stop recording")
+    cn = sub.add_parser("connect", help="Attach TUI to active session")
+    cn.add_argument("session_id", nargs="?", help="Session ID prefix (defaults to active)")
+    _add_ui_flags(cn)
     v = sub.add_parser("view", help="Inspect captured session data")
     v.add_argument("session_id", nargs="?")
     l_log = sub.add_parser("log", help="List sessions")
@@ -2287,7 +2354,7 @@ def main() -> None:
 
     args = p.parse_args()
     cmds = {
-        "init": cmd_init, "start": cmd_start, "stop": cmd_stop,
+        "init": cmd_init, "start": cmd_start, "stop": cmd_stop, "connect": cmd_connect,
         "view": cmd_view, "log": cmd_log, "status": cmd_status,
         "login": cmd_login, "logout": cmd_logout, "accounts": cmd_accounts, "switch": cmd_switch,
         "push": cmd_push, "tag": cmd_tag, "publish": cmd_publish,
