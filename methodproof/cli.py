@@ -491,7 +491,8 @@ def cmd_init(args: argparse.Namespace) -> None:
 def cmd_shell_hook(_args: argparse.Namespace) -> None:
     """Print the shell hook text for the current shell (for eval)."""
     _, hook_text = hook.get_shell_rc()
-    print(hook_text.strip())
+    alias = 'Set-Alias mp methodproof' if sys.platform == "win32" else 'alias mp="methodproof"'
+    print(hook_text.strip() + "\n" + alias)
 
 
 # ── TUI mode helpers ──────────────────────────────────────────────────────────
