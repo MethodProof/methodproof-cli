@@ -5,10 +5,19 @@ Four display layers:
   E — Causal chain tree indentation (prompt→tool→result)
   A — Journal mode content enrichment (second dim line)
   D — Enriched session bar (badges, event count)
+
+Ten controls:
+  j — journal toggle       f — event filter cycle
+  s — scroll lock           / — feed search
+  tab — sidebar cycle       t — tree collapse
+  d — timestamp format      c — copy last event
+  enter — event detail      m — quiet mode
 """
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import time
 from datetime import datetime, UTC
 
@@ -16,7 +25,8 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
-from textual.widgets import Footer, Header, RichLog, Static
+from textual.screen import Screen
+from textual.widgets import Footer, Header, Input, RichLog, Static
 from methodproof import config, store
 from methodproof.agents.base import log
 from methodproof.tui.theme import ACTIVE, BASE_CSS
@@ -59,11 +69,30 @@ _CSS = BASE_CSS + f"""
 #moment-alert.visible {{
     display: block;
 }}
+#search-bar {{
+    display: none;
+    height: 1;
+    background: {ACTIVE.surface};
+    padding: 0 1;
+}}
+#search-bar.visible {{
+    display: block;
+}}
+#search-input {{
+    width: 1fr;
+}}
+#detail-view {{
+    width: 80%;
+    height: 80%;
+    background: {ACTIVE.panel_bg};
+    border: solid {ACTIVE.gold_deep};
+    padding: 1 2;
+}}
 """
 
 _POLL_INTERVAL = 0.5
 
-# ── Layer B: Semantic color roles ──────��─────────────────────────────
+# ── Layer B: Semantic color roles ────────────────────────────────────
 _EVENT_ROLE: dict[str, str] = {
     # AI input (purple)
     "llm_prompt": "ai_input", "agent_prompt": "ai_input",
@@ -98,13 +127,24 @@ _MOMENT_TYPES = {
     "focused_session", "breakthrough", "approach_pivot",
 }
 
+_DIM_TYPES = {
+    "music_playing", "environment_profile", "mcp_elicitation",
+    "mcp_elicitation_result", "context_compact_start", "context_compact_end",
+}
+
+_FILTER_PRESETS = ["all", "ai_input", "ai_output", "human", "verify"]
+
+_TS_MODES = ["clock", "relative", "elapsed"]
+
+_SIDEBAR_VIEWS = ["stats", "files", "tools"]
+
 
 def _event_color(etype: str) -> str:
     role = _EVENT_ROLE.get(etype, "dim")
     return getattr(ACTIVE, role, ACTIVE.dim)
 
 
-# ── Layer E: Causal chain tree tracker ───��───────────────────────────
+# ── Layer E: Causal chain tree tracker ───────────────────────────────
 class _TreeTracker:
     """Track prompt→tool_call→tool_result causal chains."""
 
@@ -129,21 +169,35 @@ class _TreeTracker:
 
     def __init__(self) -> None:
         self._in_chain = False
+        self._collapsed = False
+        self._collapse_count = 0
 
-    def feed(self, etype: str) -> str:
+    def set_collapsed(self, val: bool) -> None:
+        self._collapsed = val
+        self._collapse_count = 0
+
+    def feed(self, etype: str) -> tuple[str, bool]:
+        """Return (prefix, visible). When collapsed, inners are hidden."""
         if etype in self._OPENERS:
             self._in_chain = True
-            return "  "
+            self._collapse_count = 0
+            return "  ", True
         if self._in_chain:
             if etype in self._CLOSERS:
                 self._in_chain = False
-                return "└ "
+                cnt = self._collapse_count
+                self._collapse_count = 0
+                if self._collapsed and cnt > 0:
+                    return f"└ +{cnt} ", True
+                return "└ ", True
             if etype in self._INNERS:
-                return "├ "
-            # Non-chain event while in chain — implicit close
+                if self._collapsed:
+                    self._collapse_count += 1
+                    return "├ ", False
+                return "├ ", True
             self._in_chain = False
-            return "  "
-        return "  "
+            return "  ", True
+        return "  ", True
 
 
 # ── Layer B: Structural metadata formatters ──────────────────────────
@@ -191,8 +245,11 @@ def _fmt_meta(ev: dict) -> str:
         dur = ev.get("duration_ms", "")
         return f"{tokens} tokens  {dur}ms" if tokens else ""
 
-    # Hook lifecycle — user prompt
+    # Hook lifecycle — user prompt (structural analysis summary)
     if etype == "user_prompt":
+        summary = meta.get("prompt_summary", "")
+        if summary:
+            return summary[:80]
         length = meta.get("prompt_length", "")
         return f"{length} chars" if length else ""
 
@@ -266,23 +323,76 @@ def _fmt_meta(ev: dict) -> str:
     return ", ".join(f"{k}={meta[k]}" for k in keys) if keys else ""
 
 
-# ── Layer A: Journal content enrichment ──���───────────────────────────
-def _journal_line(ev: dict, journal_mode: bool) -> str | None:
-    """Return truncated content preview when journal mode is ON."""
+# ── Layer A: Journal content enrichment ──────────────────────────────
+_MULTILINE_TYPES = {"user_prompt": "prompt_text", "agent_complete": "last_message_preview"}
+
+
+def _journal_lines(ev: dict, journal_mode: bool) -> list[str]:
+    """Return content lines when journal mode is ON. Multi-line for prompts/completions."""
     if not journal_mode:
-        return None
+        return []
     meta = ev.get("metadata") or {}
     if not isinstance(meta, dict):
-        return None
+        return []
     etype = ev.get("type", "")
-    for jetype, field in config.JOURNAL_CONTENT_FIELDS:
-        if jetype == etype and field in meta:
-            content = str(meta[field]).replace("\n", " ")[:120]
-            return content if content else None
-    return None
+
+    # Multi-line: user_prompt (full), agent_complete (~paragraph)
+    field = _MULTILINE_TYPES.get(etype)
+    if field and field in meta:
+        raw = str(meta[field]).strip()
+        if not raw:
+            return []
+        if etype == "user_prompt":
+            # Full prompt, wrap at ~100 chars per line
+            return [raw[i:i + 100] for i in range(0, len(raw), 100)]
+        # agent_complete: ~500 chars, preserve natural line breaks
+        text = raw[:500]
+        return [line for line in text.split("\n") if line.strip()][:8]
+
+    # Single-line for everything else
+    for jetype, jfield in config.JOURNAL_CONTENT_FIELDS:
+        if jetype == etype and jfield in meta:
+            content = str(meta[jfield]).replace("\n", " ")[:120]
+            return [content] if content else []
+    return []
 
 
-# ── App ──────────────────────────────────��───────────────────────────
+# ── Detail modal ─────────────────────────────────────────────────────
+class _DetailScreen(Screen[None]):
+    """Full metadata view for a single event."""
+
+    BINDINGS = [Binding("escape", "dismiss", "close")]
+
+    def __init__(self, ev: dict) -> None:
+        super().__init__()
+        self._ev = ev
+
+    def compose(self) -> ComposeResult:
+        yield Static(
+            f"[{ACTIVE.gold}]Event Detail[/{ACTIVE.gold}]  "
+            f"[{ACTIVE.dim}]ESC to close[/{ACTIVE.dim}]",
+        )
+        yield RichLog(id="detail-view", highlight=True, markup=True, wrap=True)
+
+    def on_mount(self) -> None:
+        view = self.query_one("#detail-view", RichLog)
+        P = ACTIVE
+        ev = self._ev
+        view.write(f"[{P.gold}]type:[/{P.gold}] {ev.get('type', '?')}")
+        view.write(f"[{P.gold}]id:[/{P.gold}]   {ev.get('id', '?')}")
+        view.write(f"[{P.gold}]ts:[/{P.gold}]   {ev.get('ts', '?')}")
+        view.write("")
+        meta = ev.get("metadata") or {}
+        if isinstance(meta, dict):
+            for k, v in meta.items():
+                val = str(v)[:200]
+                view.write(f"[{P.dim}]{k}:[/{P.dim}] {val}")
+
+    def action_dismiss(self) -> None:
+        self.app.pop_screen()
+
+
+# ── App ──────────────────────────────────────────────────────────────
 class StartApp(App[None]):
     """Live session view — tails the active session's events."""
 
@@ -291,7 +401,16 @@ class StartApp(App[None]):
     BINDINGS = [
         Binding("q", "stop_session", "stop"),
         Binding("p", "pause", "pause"),
-        Binding("l", "toggle_live", "toggle live"),
+        Binding("j", "toggle_journal", "journal"),
+        Binding("f", "cycle_filter", "filter"),
+        Binding("s", "toggle_scroll", "scroll"),
+        Binding("slash", "open_search", "search"),
+        Binding("tab", "cycle_sidebar", "sidebar"),
+        Binding("t", "toggle_tree", "tree"),
+        Binding("d", "cycle_timestamp", "time"),
+        Binding("c", "copy_last", "copy"),
+        Binding("enter", "show_detail", "detail"),
+        Binding("m", "toggle_quiet", "quiet"),
         Binding("escape", "quit", "quit"),
     ]
 
@@ -308,6 +427,17 @@ class StartApp(App[None]):
         self._start_time = session.get("created_at", time.time())
         self._tree = _TreeTracker()
         self._journal_mode = False
+        # Controls state
+        self._filter_idx = 0  # index into _FILTER_PRESETS
+        self._scroll_locked = False
+        self._search_query = ""
+        self._sidebar_idx = 0  # index into _SIDEBAR_VIEWS
+        self._ts_mode_idx = 0  # index into _TS_MODES
+        self._quiet_mode = False
+        self._last_event: dict | None = None
+        self._last_event_ts: float = 0.0
+        self._recent_files: list[str] = []
+        self._recent_tools: list[str] = []
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -316,6 +446,7 @@ class StartApp(App[None]):
             with Vertical(id="feed-col"):
                 yield RichLog(id="feed", highlight=True, markup=True, wrap=False)
                 yield Static("", id="moment-alert", markup=True)
+                yield Input(placeholder="search...", id="search-input")
             with Vertical(id="sidebar"):
                 yield Static("Stats", classes="sidebar-title")
                 yield Static("", id="stats-content", markup=True)
@@ -333,9 +464,31 @@ class StartApp(App[None]):
             log("warning", "tui.jwt_decode.failed", error=str(exc))
             claims = {}
         self._account_type = (claims.get("account_type") or "free").capitalize()
+        # Hide search input initially
+        self.query_one("#search-input", Input).display = False
         self._tick_timer()
         self.set_interval(_POLL_INTERVAL, self._poll_events)
         self.set_interval(1.0, self._tick_timer)
+
+    # ── Timestamp formatting ─────────────────────────────────────
+    def _format_ts(self, ev_ts: float) -> str:
+        mode = _TS_MODES[self._ts_mode_idx]
+        if mode == "clock":
+            return datetime.fromtimestamp(ev_ts, tz=UTC).strftime("%H:%M:%S")
+        if mode == "relative":
+            delta = ev_ts - self._last_event_ts if self._last_event_ts else 0
+            return f"+{delta:.1f}s" if delta >= 0 else "+0.0s"
+        # elapsed
+        elapsed = ev_ts - self._start_time
+        return f"{elapsed:.1f}s"
+
+    # ── Filter check ─────────────────────────────────────────────
+    def _passes_filter(self, etype: str) -> bool:
+        preset = _FILTER_PRESETS[self._filter_idx]
+        if preset == "all":
+            return True
+        role = _EVENT_ROLE.get(etype, "dim")
+        return role == preset
 
     # ── Layer D: Session bar ─────────────────────────────────────
     def _tick_timer(self) -> None:
@@ -346,15 +499,32 @@ class StartApp(App[None]):
         h, m, s = elapsed // 3600, (elapsed % 3600) // 60, elapsed % 60
         sid = self._session_id[:8]
         watch_dir = self._session.get("watch_dir", "?")
-        journal = f"  [{P.gold}]J[/{P.gold}]" if self._journal_mode else ""
+
+        # Mode badges
+        badges = []
+        if self._journal_mode:
+            badges.append(f"[{P.gold}]J[/{P.gold}]")
+        if self._scroll_locked:
+            badges.append(f"[{P.red}]⏸[/{P.red}]")
+        if self._quiet_mode:
+            badges.append(f"[{P.dim}]Q[/{P.dim}]")
+        if self._tree._collapsed:
+            badges.append(f"[{P.dim}]T[/{P.dim}]")
+        filt = _FILTER_PRESETS[self._filter_idx]
+        if filt != "all":
+            badges.append(f"[{P.purple}]{filt}[/{P.purple}]")
+        badge_str = "  ".join(badges)
+        if badge_str:
+            badge_str = f"  {badge_str}"
+
         ev = f"  {self._event_count} ev" if self._event_count else ""
         self.query_one("#session-bar", Static).update(
             f"  session: [{P.gold}]{sid}[/{P.gold}]  ·  {watch_dir}"
             f"  ·  [{P.green}]●[/{P.green}]  {h:02d}:{m:02d}:{s:02d}"
-            f"{ev}{journal}  ·  [{P.purple}]{self._account_type}[/{P.purple}]"
+            f"{ev}{badge_str}  ·  [{P.purple}]{self._account_type}[/{P.purple}]"
         )
 
-    # ── Event poll: Layers B + E + A ��────────────────────────────
+    # ── Event poll: Layers B + E + A ─────────────────────────────
     def _poll_events(self) -> None:
         if self._paused:
             return
@@ -367,30 +537,73 @@ class StartApp(App[None]):
             return
 
         P = ACTIVE
-        feed = self.query_one(RichLog)
+        feed = self.query_one("#feed", RichLog)
         for ev in events:
             self._last_seen_id = ev.get("id", self._last_seen_id)
             etype = ev.get("type", "event")
+            self._last_event = ev
+            ev_ts = ev.get("ts", time.time())
+
+            # Quiet mode: skip dim events
+            if self._quiet_mode and etype in _DIM_TYPES:
+                self._stats[etype] = self._stats.get(etype, 0) + 1
+                self._event_count += 1
+                continue
+
+            # Filter check
+            if not self._passes_filter(etype):
+                self._stats[etype] = self._stats.get(etype, 0) + 1
+                self._event_count += 1
+                self._last_event_ts = ev_ts
+                continue
+
             color = _event_color(etype)
-            ts = datetime.fromtimestamp(
-                ev.get("ts", time.time()), tz=UTC,
-            ).strftime("%H:%M:%S")
-            prefix = self._tree.feed(etype)
+            ts = self._format_ts(ev_ts)
+            self._last_event_ts = ev_ts
+            prefix, visible = self._tree.feed(etype)
             meta = _fmt_meta(ev)
 
-            # Layer B + E: structural line with tree prefix
-            feed.write(
-                f"[{P.dim}]{ts}[/{P.dim}] "
-                f"[{P.gold_ember}]{prefix}[/{P.gold_ember}]"
-                f"[{color}]{etype:<18}[/{color}] "
-                f"[{P.dim}]{meta}[/{P.dim}]"
-            )
+            # Track recent files and tools
+            ev_meta = ev.get("metadata") or {}
+            if isinstance(ev_meta, dict):
+                path = ev_meta.get("path") or ev_meta.get("file_path")
+                if path and etype in ("file_edit", "file_create", "file_delete"):
+                    if path not in self._recent_files:
+                        self._recent_files.append(path)
+                    if len(self._recent_files) > 10:
+                        self._recent_files.pop(0)
+                tool = ev_meta.get("tool_name")
+                if tool and etype in ("tool_call", "tool_result"):
+                    if tool not in self._recent_tools:
+                        self._recent_tools.append(tool)
+                    if len(self._recent_tools) > 10:
+                        self._recent_tools.pop(0)
+
+            if not visible:
+                # Collapsed inner — count but don't render
+                self._stats[etype] = self._stats.get(etype, 0) + 1
+                self._event_count += 1
+                continue
+
+            # Search highlight
+            line_plain = f"{etype} {meta}"
+            if self._search_query and self._search_query.lower() not in line_plain.lower():
+                # Still render but dimmed
+                feed.write(f"[{P.dim}]{ts}  {prefix}{etype:<18} {meta}[/{P.dim}]")
+            else:
+                # Layer B + E: structural line with tree prefix
+                feed.write(
+                    f"[{P.dim}]{ts}[/{P.dim}] "
+                    f"[{P.gold_ember}]{prefix}[/{P.gold_ember}]"
+                    f"[{color}]{etype:<18}[/{color}] "
+                    f"[{P.dim}]{meta}[/{P.dim}]"
+                )
+
             # Layer A: journal content enrichment
-            jline = _journal_line(ev, self._journal_mode)
-            if jline:
+            for jline in _journal_lines(ev, self._journal_mode):
                 feed.write(
                     f"           [{P.gold_ember}]│[/{P.gold_ember}] "
-                    f"[{P.dim}]\"{jline}\"[/{P.dim}]"
+                    f"[{P.dim}]{jline}[/{P.dim}]"
                 )
 
             self._stats[etype] = self._stats.get(etype, 0) + 1
@@ -398,21 +611,41 @@ class StartApp(App[None]):
 
             # Moment detection
             if etype in _MOMENT_TYPES:
-                m = ev.get("metadata") or {}
-                detail = m.get("detail", m.get("description", etype))
+                m_meta = ev.get("metadata") or {}
+                detail = m_meta.get("detail", m_meta.get("description", etype))
                 self._show_moment(etype, str(detail)[:60])
 
         if events:
-            self._refresh_stats()
+            self._refresh_sidebar()
 
-    def _refresh_stats(self) -> None:
-        lines = []
-        for etype, count in sorted(self._stats.items(), key=lambda x: -x[1])[:10]:
-            color = _event_color(etype)
-            lines.append(
-                f"[{ACTIVE.dim}]{etype:<14}[/{ACTIVE.dim}] [{color}]{count}[/{color}]"
-            )
-        self.query_one("#stats-content", Static).update("\n".join(lines))
+    def _refresh_sidebar(self) -> None:
+        view = _SIDEBAR_VIEWS[self._sidebar_idx]
+        title = self.query_one(".sidebar-title", Static)
+        content = self.query_one("#stats-content", Static)
+        P = ACTIVE
+
+        if view == "stats":
+            title.update("Stats")
+            lines = []
+            for etype, count in sorted(self._stats.items(), key=lambda x: -x[1])[:10]:
+                color = _event_color(etype)
+                lines.append(f"[{P.dim}]{etype:<14}[/{P.dim}] [{color}]{count}[/{color}]")
+            content.update("\n".join(lines))
+
+        elif view == "files":
+            title.update("Files")
+            lines = []
+            for path in reversed(self._recent_files[-10:]):
+                short = path.rsplit("/", 1)[-1] if "/" in path else path
+                lines.append(f"[{P.dim}]{short[:20]}[/{P.dim}]")
+            content.update("\n".join(lines) if lines else f"[{P.dim}]no files yet[/{P.dim}]")
+
+        elif view == "tools":
+            title.update("Tools")
+            lines = []
+            for tool in reversed(self._recent_tools[-10:]):
+                lines.append(f"[{P.dim}]{tool[:20]}[/{P.dim}]")
+            content.update("\n".join(lines) if lines else f"[{P.dim}]no tools yet[/{P.dim}]")
 
     def _show_moment(self, mtype: str, detail: str) -> None:
         P = ACTIVE
@@ -421,14 +654,93 @@ class StartApp(App[None]):
         alert.add_class("visible")
         self.set_timer(4.0, lambda: alert.remove_class("visible"))
 
+    # ── Actions ──────────────────────────────────────────────────
     def action_stop_session(self) -> None:
         self.exit(None)
 
     def action_pause(self) -> None:
         self._paused = not self._paused
 
-    def action_toggle_live(self) -> None:
-        pass  # handled by caller in cli.py
+    def action_toggle_journal(self) -> None:
+        self._journal_mode = not self._journal_mode
+        self._tick_timer()
+
+    def action_cycle_filter(self) -> None:
+        self._filter_idx = (self._filter_idx + 1) % len(_FILTER_PRESETS)
+        P = ACTIVE
+        filt = _FILTER_PRESETS[self._filter_idx]
+        feed = self.query_one("#feed", RichLog)
+        feed.write(f"[{P.dim}]── filter: {filt} ──[/{P.dim}]")
+        self._tick_timer()
+
+    def action_toggle_scroll(self) -> None:
+        self._scroll_locked = not self._scroll_locked
+        feed = self.query_one("#feed", RichLog)
+        feed.auto_scroll = not self._scroll_locked
+        self._tick_timer()
+
+    def action_open_search(self) -> None:
+        search = self.query_one("#search-input", Input)
+        if search.display:
+            search.display = False
+            self._search_query = ""
+            self.set_focus(self.query_one("#feed", RichLog))
+        else:
+            search.display = True
+            search.value = self._search_query
+            self.set_focus(search)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "search-input":
+            self._search_query = event.value.strip()
+            event.input.display = False
+            self.set_focus(self.query_one("#feed", RichLog))
+
+    def action_cycle_sidebar(self) -> None:
+        self._sidebar_idx = (self._sidebar_idx + 1) % len(_SIDEBAR_VIEWS)
+        self._refresh_sidebar()
+
+    def action_toggle_tree(self) -> None:
+        self._tree.set_collapsed(not self._tree._collapsed)
+        P = ACTIVE
+        state = "collapsed" if self._tree._collapsed else "expanded"
+        feed = self.query_one("#feed", RichLog)
+        feed.write(f"[{P.dim}]── tree: {state} ──[/{P.dim}]")
+        self._tick_timer()
+
+    def action_cycle_timestamp(self) -> None:
+        self._ts_mode_idx = (self._ts_mode_idx + 1) % len(_TS_MODES)
+        P = ACTIVE
+        mode = _TS_MODES[self._ts_mode_idx]
+        feed = self.query_one("#feed", RichLog)
+        feed.write(f"[{P.dim}]── time: {mode} ──[/{P.dim}]")
+
+    def action_copy_last(self) -> None:
+        if not self._last_event:
+            return
+        text = json.dumps(self._last_event, indent=2, default=str)
+        try:
+            if sys.platform == "darwin":
+                subprocess.run(["pbcopy"], input=text.encode(), check=True)
+            else:
+                subprocess.run(["xclip", "-selection", "clipboard"], input=text.encode(), check=True)
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            return
+        P = ACTIVE
+        feed = self.query_one("#feed", RichLog)
+        feed.write(f"[{P.dim}]── copied to clipboard ──[/{P.dim}]")
+
+    def action_show_detail(self) -> None:
+        if self._last_event:
+            self.push_screen(_DetailScreen(self._last_event))
+
+    def action_toggle_quiet(self) -> None:
+        self._quiet_mode = not self._quiet_mode
+        P = ACTIVE
+        state = "on" if self._quiet_mode else "off"
+        feed = self.query_one("#feed", RichLog)
+        feed.write(f"[{P.dim}]── quiet: {state} ──[/{P.dim}]")
+        self._tick_timer()
 
 
 def run(session_id: str, session: dict) -> None:

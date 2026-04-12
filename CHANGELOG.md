@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.35] — 2026-04-12
+
+### Added
+- **10 TUI controls for `mp start`** — `j` journal toggle, `f` event filter cycle (all/ai_input/ai_output/human/verify), `s` scroll lock, `/` feed search, `tab` sidebar cycle (stats/files/tools), `t` tree collapse (hides chain inners, shows `+N` on closer), `d` timestamp format cycle (clock/relative/elapsed), `c` copy last event to clipboard, `enter` event detail modal, `m` quiet mode (hides dim events). All modes shown as badges in the session bar.
+- **Structural analysis summary on `user_prompt` events** — main line now shows `prompt_summary` from the 35-dimension analysis (e.g. `[instruction/synthesis] refactor auth — DI`) instead of just char count.
+- **Multi-line journal output** — `user_prompt` shows full prompt text wrapped at 100 chars. `agent_complete` shows up to 500 chars / 8 lines preserving natural line breaks. Other event types remain single-line at 120 char cap.
+
 ## [0.7.34] — 2026-04-12
 
 ### Fixed

@@ -52,6 +52,29 @@ methodproof view      # explore your session in the browser
 - **Auto-detection** — hooks for shell, Claude Code, OpenClaw, codex, gemini, aider installed automatically
 - **Platform sync** — `methodproof push` uploads sessions. `methodproof publish` makes them public and shareable
 
+## Live Session TUI
+
+`mp start` launches a rich terminal UI that streams captured events in real-time. Events are color-coded by role (purple = AI input, gold = AI output, cream = human, green = verification) and indented into causal chains with Unicode tree characters.
+
+### Controls
+
+| Key | Action | Description |
+|-----|--------|-------------|
+| `j` | Journal toggle | Show/hide full content lines (prompts, completions, diffs) mid-session |
+| `f` | Filter cycle | All → AI input → AI output → Human → Verify |
+| `s` | Scroll lock | Freeze scroll position while events buffer; release snaps to bottom |
+| `/` | Search | Filter feed — non-matching lines render dimmed |
+| `tab` | Sidebar cycle | Stats → Recent files → Recent tools |
+| `t` | Tree collapse | Hide chain inners, show `+N` count on closer |
+| `d` | Timestamp format | Clock (`12:34:56`) → Relative (`+1.2s`) → Elapsed (`45.3s`) |
+| `c` | Copy last event | Full JSON metadata to clipboard |
+| `enter` | Event detail | Modal overlay with all metadata fields |
+| `m` | Quiet mode | Hide dim events (music, environment, MCP, context compaction) |
+| `p` | Pause | Pause/resume event polling |
+| `q` | Stop | Stop the session |
+
+Active modes display as badges in the session bar: `J` (journal), `⏸` (scroll locked), `Q` (quiet), `T` (tree collapsed), filter name when not "all".
+
 ## Security Architecture
 
 Every event passes through consent gating, encryption, and hash chaining before touching disk. The platform adds a server co-signature on push, creating two-party evidence.
