@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.22] — 2026-04-11
+
+### Added
+- **Username in session output** — `mp start` banner shows `Account: @username` (falls back to email). `mp stop` summary shows the same. Username fetched from `/auth/me` on login and stored in config profile.
+
+### Fixed
+- **`eval "$(methodproof shell-hook)"` missing `mp` alias** — `shell-hook` now emits both the command-logging hooks and `alias mp="methodproof"`, so eval fully activates the CLI without a shell restart.
+
 ## [0.7.20] — 2026-04-11
 
 ### Fixed
