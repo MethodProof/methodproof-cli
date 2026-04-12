@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.23] — 2026-04-12
+
+### Fixed
+- **`mp` alias works immediately after `init`** — `_install_alias` now creates a real symlink (`mp → methodproof`) in the same bin directory instead of writing an rc alias. No shell restart or eval needed. Falls back to rc alias if symlinking fails (e.g. read-only bin dir).
+
 ## [0.7.22] — 2026-04-11
 
 ### Added

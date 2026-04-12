@@ -131,7 +131,21 @@ _ALIAS_MARKER = "# methodproof-alias"
 
 
 def _install_alias() -> None:
-    """Add `alias mp=methodproof` to the user's shell rc file."""
+    """Install `mp` as an executable symlink next to `methodproof` in PATH.
+    Falls back to writing an alias in the shell rc if symlinking fails."""
+    import shutil
+    mp_exe = shutil.which("mp")
+    methodproof_exe = shutil.which("methodproof")
+    if mp_exe:
+        return  # already exists
+    if methodproof_exe and sys.platform != "win32":
+        mp_path = Path(methodproof_exe).parent / "mp"
+        try:
+            mp_path.symlink_to(methodproof_exe)
+            return
+        except OSError:
+            pass  # fall through to rc alias
+    # Fallback: write alias to shell rc (requires shell restart / eval)
     rc, _ = hook.get_shell_rc()
     if rc.exists() and _ALIAS_MARKER in rc.read_text():
         return
@@ -484,8 +498,12 @@ def cmd_init(args: argparse.Namespace) -> None:
         print("Signing key: exists")
 
     _print_intro()
-    print("  Restart your shell or run this to activate now:\n")
-    print("    eval \"$(methodproof shell-hook)\"\n")
+    import shutil
+    if shutil.which("mp"):
+        print("  Run `mp start` to begin recording.\n")
+    else:
+        print("  Restart your shell or run this to activate `mp`:\n")
+        print("    eval \"$(methodproof shell-hook)\"\n")
 
 
 def cmd_shell_hook(_args: argparse.Namespace) -> None:
