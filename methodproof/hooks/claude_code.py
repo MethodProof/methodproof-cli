@@ -58,13 +58,31 @@ _TYPE_MAP = {
 
 _TOOL = "claude_code"
 
+def _tool_input_preview(d: dict) -> str:
+    """Compact one-line summary of tool input for journal mode."""
+    inp = d.get("tool_input") or {}
+    # Flatten the most useful field per tool rather than dumping the whole dict
+    for key in ("command", "file_path", "path", "query", "url", "description"):
+        if key in inp:
+            return str(inp[key])[:300]
+    return json.dumps(inp)[:300] if inp else ""
+
+
 _META_EXTRACTORS = {
     "UserPromptSubmit": lambda d: {
-        "tool": _TOOL, "prompt_preview": _build_prompt_meta(d.get("prompt") or "").get("prompt_summary", ""),
+        "tool": _TOOL,
+        "prompt_text": d.get("prompt") or "",
+        "prompt_preview": _build_prompt_meta(d.get("prompt") or "").get("prompt_summary", ""),
         "prompt_length": len(d.get("prompt") or ""),
     },
-    "PreToolUse": lambda d: {"tool": _TOOL, "tool_name": d.get("tool_name", "unknown")},
-    "PostToolUse": lambda d: {"tool": _TOOL, "tool_name": d.get("tool_name", "unknown"), "success": True},
+    "PreToolUse": lambda d: {
+        "tool": _TOOL, "tool_name": d.get("tool_name", "unknown"),
+        "tool_input_preview": _tool_input_preview(d),
+    },
+    "PostToolUse": lambda d: {
+        "tool": _TOOL, "tool_name": d.get("tool_name", "unknown"), "success": True,
+        "result_preview": str(d.get("tool_response") or "")[:500],
+    },
     "PostToolUseFailure": lambda d: {
         "tool": _TOOL, "tool_name": d.get("tool_name", "unknown"),
         "success": False, "is_interrupt": d.get("is_interrupt", False),

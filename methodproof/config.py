@@ -114,6 +114,10 @@ JOURNAL_CONTENT_FIELDS: list[tuple[str, str]] = [
     ("browser_ai_chat", "url"),
     # Tasks — subject reveals intent
     ("task_created", "subject"),
+    # Claude Code hooks — tool input/output and raw user prompt
+    ("user_prompt", "prompt_text"),
+    ("tool_call", "tool_input_preview"),
+    ("tool_result", "result_preview"),
 ]
 
 

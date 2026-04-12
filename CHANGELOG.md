@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.26] — 2026-04-12
+
+### Fixed
+- **Journal mode missing tool and prompt content** — `tool_call`, `tool_result`, and `user_prompt` hook events never captured content even with journal mode on; the extractors never included it. `tool_call` now captures `tool_input_preview` (command/path/query smartly extracted), `tool_result` captures `result_preview` (500 char cap), `user_prompt` captures `prompt_text`. All three fields are added to `JOURNAL_CONTENT_FIELDS` so they're stripped when journal is off.
+
 ## [0.7.25] — 2026-04-12
 
 ### Fixed
