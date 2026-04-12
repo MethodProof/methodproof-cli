@@ -160,28 +160,12 @@ _PRO_TIERS = {"pro", "team", "admin", "superadmin"}
 
 
 def _journal_entitlement(cfg: dict) -> str | int:
-    """Return 'unlimited' for Pro+ users, or an int credit count for others.
-
-    For Basic users, fetches live credit count from the platform; falls back
-    to the locally cached value if the request fails (e.g. offline).
-    """
+    """Return 'unlimited' for Pro+ users, or an int credit count for free users."""
     token = cfg.get("token", "")
     claims = _decode_jwt_claims(token) if token else {}
     account_type = claims.get("account_type", "free").lower()
-
     if account_type in _PRO_TIERS:
         return "unlimited"
-
-    if account_type == "basic":
-        try:
-            profile = _request("GET", "/auth/me", cfg.get("api_url", config.LOCAL_API_URL), token)
-            server_credits = profile.get("journal_credits")
-            if server_credits is not None:
-                cfg["journal_credits"] = int(server_credits)
-                config.save(cfg)
-        except Exception:
-            pass  # offline — use local cache
-
     return int(cfg.get("journal_credits", 0))
 
 

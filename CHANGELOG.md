@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.30] — 2026-04-12
+
+### Changed
+- **Removed Basic tier from journal entitlement** — tiers are Free and Pro+ only. Dropped the server-side credit fetch for Basic; `_journal_entitlement` now returns `"unlimited"` for Pro+ and local credit count for Free.
+
 ## [0.7.29] — 2026-04-12
 
 ### Changed
