@@ -17,10 +17,16 @@ from methodproof import cli, config, graph, store
 
 
 @patch("methodproof.hook.is_installed", return_value=False)
-def test_start_hooks_not_installed(mock_hook, logged_in_cfg, cli_args):
+@patch("methodproof.hook.install", return_value="zsh: ~/.zshrc")
+@patch("methodproof.cli._require_auth", side_effect=SystemExit("not logged in"))
+def test_start_hooks_not_installed_auto_installs(mock_auth, mock_install, mock_hook, logged_in_cfg, cli_args, capsys):
+    """Missing hook auto-installs and continues (no longer hard-fails)."""
     logged_in_cfg()
     with pytest.raises(SystemExit):
         cli.cmd_start(cli_args())
+    out = capsys.readouterr().out
+    assert "Shell hook installed" in out
+    mock_install.assert_called_once()
 
 
 @patch("methodproof.hook.is_installed", return_value=True)
