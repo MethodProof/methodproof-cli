@@ -16,6 +16,28 @@ except ImportError:
     analyze_prompt = lambda _: {}
     compose_summary = lambda _: ""
 
+def _extract_result_text(response) -> str:
+    """Extract plain text from tool_response regardless of shape.
+
+    Claude Code sends:
+    - str  — Bash, Write, Edit, simple tools
+    - list — Read, Grep, Glob: [{"type": "text", "text": "..."}]
+    - dict — rare structured responses
+    """
+    if isinstance(response, str):
+        return response[:500]
+    if isinstance(response, list):
+        parts = [
+            block.get("text", "") if isinstance(block, dict) else str(block)
+            for block in response
+            if not isinstance(block, dict) or block.get("type") == "text"
+        ]
+        return "\n".join(parts)[:500]
+    if isinstance(response, dict):
+        return response.get("text") or response.get("content") or json.dumps(response)[:500]
+    return str(response)[:500]
+
+
 def _build_prompt_meta(text: str) -> dict:
     sa = analyze_prompt(text)
     sa["prompt_length"] = len(text)
@@ -81,7 +103,7 @@ _META_EXTRACTORS = {
     },
     "PostToolUse": lambda d: {
         "tool": _TOOL, "tool_name": d.get("tool_name", "unknown"), "success": True,
-        "result_preview": str(d.get("tool_response") or "")[:500],
+        "result_preview": _extract_result_text(d.get("tool_response")),
     },
     "PostToolUseFailure": lambda d: {
         "tool": _TOOL, "tool_name": d.get("tool_name", "unknown"),

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.27] — 2026-04-12
+
+### Fixed
+- **`result_preview` was Python repr for structured tool responses** — `str([{"type": "text", "text": "..."}])` produced unreadable output for Read/Grep/Glob tools. `_extract_result_text` now handles all three shapes Claude Code sends: plain string (Bash/Write/Edit), content block list (Read/Grep/Glob), and dict.
+
 ## [0.7.26] — 2026-04-12
 
 ### Fixed
