@@ -84,14 +84,22 @@ def _request(
         raise SystemExit(f"API error {exc.code}: {detail}") from None
 
 
-def push(session_id: str, token: str, api_url: str) -> str:
+def push(session_id: str, token: str, api_url: str, force: bool = False) -> str:
     """Upload a local session to the platform."""
     session = store.get_session(session_id)
     if not session:
         raise SystemExit(f"Session not found: {session_id}")
     if session["synced"]:
-        print(f"Already synced: {session_id[:8]}")
-        return session.get("remote_id", "")
+        if force:
+            print(f"Force re-push: {session_id[:8]}")
+            store.clear_sync(session_id)
+        elif not session.get("completed_at"):
+            print(f"Session was pushed while still active — re-pushing complete session.")
+            store.clear_sync(session_id)
+        else:
+            print(f"Already synced: {session_id[:8]}")
+            print(f"  (Use `mp push --force` to re-upload all events)")
+            return session.get("remote_id", "")
 
     # Create remote session (include binding + device_id if available)
     print("Creating remote session...", end=" ", flush=True)

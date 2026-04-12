@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.7.34] — 2026-04-12
+
+### Fixed
+- **`mp push` after mid-session push was permanently blocked** — pushing an active session marked it as synced. After stopping, additional events existed locally but could never be uploaded. Now: if a session was pushed while active and is now completed, `mp push` automatically re-pushes the full session. For already-completed sessions, `mp push --force` re-uploads all events.
+
+## [0.7.33] — 2026-04-12
+
+### Added
+- **KINMYAKU theme palette**: `Palette` frozen dataclass replaces flat hex constants in `tui/theme.py`. Dark-adjusted colors from METHODPROOF.md spec — purple, green, red, dim all shifted for proper contrast on dark backgrounds. Five semantic roles (`ai_input`, `ai_output`, `human`, `verify`, `moment`) so TUI code reads intent, not hex. Backward-compatible re-exports — all existing imports unchanged.
+- **Rich structural formatting for all 42 event types**: `mp start` feed now shows curated one-liners for every event type. `tool_call` → `Edit  app/core/auth.py`, `tool_result` → `Edit  ✓`, `agent_launch` → `explorer  spawned`, etc. Previously only 8 types had formatters; the rest showed raw key dumps or nothing.
+- **Causal chain tree indentation**: Prompt→tool_call→tool_result chains render with Unicode box-drawing characters (`├`, `│`, `└`) in gold-ember. Non-AI events (file edits, tests, commits) appear at root level. Mirrors the Neo4j graph structure during live capture.
+- **Journal mode content enrichment**: When journal is ON, a second dim line appears below events carrying content fields — truncated prompt text, tool results, diffs. Quoted and indented with a `│` gutter. When journal is OFF, these lines don't exist.
+- **Enriched session bar**: Now shows running event count and a gold `J` badge when journal mode is active.
+- **Moment alert wiring**: `_show_moment()` (previously dead code) now fires when known moment types appear in the event stream.
+
 ## [0.7.32] — 2026-04-12
 
 ### Fixed

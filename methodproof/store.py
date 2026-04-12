@@ -389,3 +389,11 @@ def mark_synced(session_id: str, remote_id: str) -> None:
         (remote_id, session_id),
     )
     _db().commit()
+
+
+def clear_sync(session_id: str) -> None:
+    _db().execute(
+        "UPDATE sessions SET synced = 0, remote_id = NULL WHERE id = ?",
+        (session_id,),
+    )
+    _db().commit()

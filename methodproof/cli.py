@@ -1793,7 +1793,8 @@ def cmd_push(args: argparse.Namespace) -> None:
         print("No sessions to push.")
         sys.exit(1)
     from methodproof.sync import push
-    remote_id = push(sid, cfg["token"], cfg["api_url"])
+    force = getattr(args, "force", False)
+    remote_id = push(sid, cfg["token"], cfg["api_url"], force=force)
     app = _app_url(cfg["api_url"])
     print(f"Pushed {sid[:8]} → {cfg['api_url']} (private).")
     print(f"  View: {app}/personal/sessions/{remote_id}")
@@ -2222,6 +2223,7 @@ def main() -> None:
     sw.add_argument("account", nargs="?", help="Email or account ID prefix")
     pu = sub.add_parser("push", help="Upload privately to your account")
     pu.add_argument("session_id", nargs="?")
+    pu.add_argument("--force", "-f", action="store_true", help="Re-upload all events (replaces previous push)")
     pu.add_argument("--local", action="store_true", help="Push to local dev API (localhost:8000)")
     tg = sub.add_parser("tag", help="Tag a session")
     tg.add_argument("session_id", help="Session ID (prefix ok)")
