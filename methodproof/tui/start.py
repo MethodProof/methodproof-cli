@@ -266,7 +266,9 @@ def _fmt_meta(ev: dict) -> str:
     if etype == "tool_result":
         name = meta.get("tool_name") or meta.get("tool", "")
         ok = "✓" if meta.get("success", True) else "✗"
-        return f"{name}  {ok}"
+        inp = (meta.get("tool_input_preview") or "")[:40]
+        result = (meta.get("result_preview") or "")[:40]
+        return f"{name}  {ok}  {inp}  {result}".strip()
     if etype == "tool_failure":
         name = meta.get("tool_name") or meta.get("tool", "")
         err = (meta.get("error") or "")[:40]

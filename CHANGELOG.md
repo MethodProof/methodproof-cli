@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.37] — 2026-04-12
+
+### Changed
+- **Full tool metadata capture** — shell hook now stores complete `tool_input` and `tool_response` objects alongside display previews. Previously only extracted preview strings; raw data was discarded. Enables upstream graph analysis, causal edge building, and artifact tracking from tool events.
+- **Enriched shell hook** — `PreToolUse` captures `tool_input_preview` per tool type (Bash→command, Read/Edit/Write→file_path, Grep→pattern+path, Glob→pattern, Agent→description). `PostToolUse` captures `result_preview` (Bash→stdout/stderr, Read→line count, Grep→file+line count, Glob→file count) plus `tool_input_preview` so results show what was done.
+- **Journal gating removed** — all captured metadata is now persisted regardless of journal mode. No more field stripping in `emit()`. `JOURNAL_CONTENT_FIELDS` retained as a reference for TUI enrichment display.
+- **`tool_result` TUI shows input + result** — e.g. `Grep ✓ def main /src 3 files, 15 lines` instead of just `Grep ✓`.
+
 ## [0.7.36] — 2026-04-12
 
 ### Added

@@ -99,20 +99,26 @@ _META_EXTRACTORS = {
     },
     "PreToolUse": lambda d: {
         "tool": _TOOL, "tool_name": d.get("tool_name", "unknown"),
+        "tool_input": d.get("tool_input") or {},
         "tool_input_preview": _tool_input_preview(d),
     },
     "PostToolUse": lambda d: {
         "tool": _TOOL, "tool_name": d.get("tool_name", "unknown"), "success": True,
+        "tool_input": d.get("tool_input") or {},
+        "tool_response": d.get("tool_response") or {},
+        "tool_input_preview": _tool_input_preview(d),
         "result_preview": _extract_result_text(d.get("tool_response")),
     },
     "PostToolUseFailure": lambda d: {
         "tool": _TOOL, "tool_name": d.get("tool_name", "unknown"),
         "success": False, "is_interrupt": d.get("is_interrupt", False),
+        "tool_input": d.get("tool_input") or {},
         "error": str(d.get("error", ""))[:200],
     },
     "SubagentStart": lambda d: {"tool": _TOOL, "agent_type": d.get("agent_type", "unknown"), "agent_id": d.get("agent_id", "")},
     "SubagentStop": lambda d: {
         "tool": _TOOL, "agent_type": d.get("agent_type", "unknown"), "agent_id": d.get("agent_id", ""),
+        "last_assistant_message": d.get("last_assistant_message", ""),
         "last_message_preview": str(d.get("last_assistant_message", ""))[:200],
     },
     "TaskCreated": lambda d: {"tool": _TOOL, "task_id": d.get("task_id", ""), "subject": d.get("task_subject", "")},

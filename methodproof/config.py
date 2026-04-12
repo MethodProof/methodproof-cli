@@ -79,47 +79,37 @@ CAPTURE_DESCRIPTIONS: dict[str, str] = {
     "code_capture": "Full file diffs and git patches (Pro only, encrypted, private by default)",
 }
 
-# Content fields that Journal Mode unlocks. When journal_mode is OFF (default),
-# these fields are stripped — only structural equivalents remain (lengths, counts, types).
-# When journal_mode is ON (Pro+), EVERYTHING is persisted and encrypted.
-# Journal = the complete, explicit record of the session.
+# Journal content fields — no longer gated. All captured metadata is persisted.
+# This list is retained as a reference for the TUI journal enrichment layer,
+# which uses it to identify fields worth displaying as secondary content lines.
 JOURNAL_CONTENT_FIELDS: list[tuple[str, str]] = [
-    # AI prompts — full prompt text
     ("llm_prompt", "prompt_text"),
     ("agent_prompt", "prompt_preview"),
-    # AI responses — full completion text
     ("llm_completion", "response_text"),
     ("agent_completion", "response_preview"),
     ("agent_tool_dispatch", "tool_input_preview"),
     ("agent_tool_result", "result_preview"),
     ("agent_skill_invoke", "skill_input_preview"),
-    # Terminal — full command output (command itself is structural, not gated)
     ("terminal_cmd", "output_snippet"),
-    # Code — full diffs and commit messages
     ("file_edit", "diff"),
     ("git_commit", "diff"),
     ("git_commit", "message"),
-    # Web — full search queries, URLs, page titles
+    ("git_commit", "body"),
     ("web_search", "query"),
     ("web_search", "clicked_results"),
     ("web_visit", "url"),
     ("web_visit", "title"),
-    # Browser — full search queries, URLs, copy content, AI chat input
     ("browser_search", "query"),
     ("browser_visit", "url"),
     ("browser_visit", "title"),
     ("browser_copy", "text_snippet"),
     ("browser_ai_chat", "detected_input"),
     ("browser_ai_chat", "url"),
-    # Tasks — subject reveals intent
     ("task_created", "subject"),
-    # Claude Code hooks — tool input/output and raw user prompt
     ("user_prompt", "prompt_text"),
     ("tool_call", "tool_input_preview"),
     ("tool_result", "result_preview"),
-    # Agent final message and commit body reveal content
     ("agent_complete", "last_message_preview"),
-    ("git_commit", "body"),
 ]
 
 

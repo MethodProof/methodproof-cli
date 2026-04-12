@@ -37,11 +37,62 @@ if command -v jq >/dev/null 2>&1; then
       ;;
     PreToolUse)
       TYPE="tool_call"
-      META=$(echo "$INPUT" | jq -c '{tool: (.tool_name // "unknown"), tool_use_id: (.tool_use_id // "")}' 2>/dev/null || echo '{}')
+      META=$(echo "$INPUT" | jq -c '{
+        tool: (.tool_name // "unknown"),
+        tool_use_id: (.tool_use_id // ""),
+        tool_input: (.tool_input // {}),
+        tool_input_preview: (
+          (.tool_input // {}) as $ti |
+          (.tool_name // "unknown") as $tn |
+          (if $tn == "Bash" then ($ti.command // "")
+           elif $tn == "Read" then ($ti.file_path // "")
+           elif $tn == "Write" then ($ti.file_path // "")
+           elif $tn == "Edit" then ($ti.file_path // "")
+           elif $tn == "Grep" then (($ti.pattern // "") + " " + ($ti.path // ""))
+           elif $tn == "Glob" then ($ti.pattern // "")
+           elif $tn == "Agent" then ($ti.description // $ti.prompt // "" | .[0:200])
+           else ($ti.command // $ti.file_path // $ti.path // $ti.query // $ti.pattern // $ti.url // $ti.description // $ti.prompt // ($ti | tostring)) end
+          ) | tostring | .[0:200]
+        )
+      }' 2>/dev/null || echo '{}')
       ;;
     PostToolUse)
       TYPE="tool_result"
-      META=$(echo "$INPUT" | jq -c '{tool: (.tool_name // "unknown"), tool_use_id: (.tool_use_id // "")}' 2>/dev/null || echo '{}')
+      META=$(echo "$INPUT" | jq -c '{
+        tool: (.tool_name // "unknown"),
+        tool_use_id: (.tool_use_id // ""),
+        success: true,
+        tool_input: (.tool_input // {}),
+        tool_response: (.tool_response // {}),
+        tool_input_preview: (
+          (.tool_input // {}) as $ti |
+          (.tool_name // "unknown") as $tn |
+          (if $tn == "Bash" then ($ti.command // "")
+           elif $tn == "Read" then ($ti.file_path // "")
+           elif $tn == "Write" then ($ti.file_path // "")
+           elif $tn == "Edit" then ($ti.file_path // "")
+           elif $tn == "Grep" then (($ti.pattern // "") + " " + ($ti.path // ""))
+           elif $tn == "Glob" then ($ti.pattern // "")
+           elif $tn == "Agent" then ($ti.description // $ti.prompt // "" | .[0:200])
+           else ($ti.command // $ti.file_path // $ti.path // $ti.query // $ti.pattern // $ti.url // $ti.description // $ti.prompt // ($ti | tostring)) end
+          ) | tostring | .[0:200]
+        ),
+        result_preview: (
+          (.tool_response // {}) as $tr |
+          (.tool_name // "unknown") as $tn |
+          (if $tn == "Bash" then
+             (if ($tr.stderr // "") != "" then ("stderr: " + $tr.stderr) else ($tr.stdout // "") end | .[0:200])
+           elif $tn == "Read" then
+             (($tr.file.numLines // $tr.numLines // 0) | tostring) + " lines"
+           elif $tn == "Grep" then
+             (($tr.numFiles // 0) | tostring) + " files, " + (($tr.numLines // 0) | tostring) + " lines"
+           elif $tn == "Glob" then
+             (($tr.numFiles // 0) | tostring) + " files"
+           elif ($tr | type) == "string" then ($tr | .[0:200])
+           else ($tr | tostring | .[0:200]) end
+          )
+        )
+      }' 2>/dev/null || echo '{}')
       ;;
     SubagentStart)
       TYPE="agent_launch"
@@ -65,7 +116,7 @@ if command -v jq >/dev/null 2>&1; then
       ;;
     PostToolUseFailure)
       TYPE="tool_failure"
-      META=$(echo "$INPUT" | jq -c '{tool_name: (.tool_name // "unknown"), is_interrupt: (.is_interrupt // false), error: (.error // "" | .[0:200])}' 2>/dev/null || echo '{}')
+      META=$(echo "$INPUT" | jq -c '{tool: (.tool_name // "unknown"), is_interrupt: (.is_interrupt // false), success: false, error: (.error // "" | .[0:200])}' 2>/dev/null || echo '{}')
       ;;
     SessionEnd)
       TYPE="claude_session_end"
