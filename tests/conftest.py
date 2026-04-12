@@ -125,7 +125,7 @@ def cli_args():
             "verbose": False, "streaming": False, "force": False,
             "local": False, "api_url": None, "no_key": False, "auto": None,
             "account": None, "purge": False, "keep_sessions": False,
-            "anonymous": False,
+            "anonymous": False, "yes": False,
         }
         defaults.update(kwargs)
         return argparse.Namespace(**defaults)

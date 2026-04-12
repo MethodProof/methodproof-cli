@@ -427,11 +427,13 @@ def test_consent_detailed_redaction_toggle():
 # ── cmd_init ──
 
 
-@patch("methodproof.tui.init.run")
-def test_init_first_run(mock_tui_init, cli_args):
-    # First run: consent_acknowledged=False forces TUI regardless of ui_mode
-    cli.cmd_init(cli_args())
-    mock_tui_init.assert_called_once()
+@patch("methodproof.hook.install", return_value="hook installed")
+@patch("methodproof.integrity.has_keypair", return_value=True)
+def test_init_first_run(mock_keypair, mock_hook, cli_args, capsys):
+    # First run with --yes: all prompts auto-accepted, no stdin required
+    cli.cmd_init(cli_args(yes=True))
+    out = capsys.readouterr().out
+    assert "METHODPROOF" in out or "Recording" in out or "mp start" in out
 
 
 @patch("methodproof.integrity.has_keypair", return_value=True)
