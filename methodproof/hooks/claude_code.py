@@ -150,11 +150,9 @@ def main() -> None:
         return
 
     event = data.get("hook_event_name", "unknown")
-    etype = _TYPE_MAP.get(event)
-    if not etype:
-        return  # Unmapped hook event — drop rather than send invalid type
+    etype = _TYPE_MAP.get(event, "claude_code_event")
     extractor = _META_EXTRACTORS.get(event)
-    meta = extractor(data) if extractor else {"tool": _TOOL}
+    meta = extractor(data) if extractor else {"tool": _TOOL, "event": event}
     ts = time.time()
 
     payload = json.dumps({"events": [{"type": etype, "timestamp": ts, "metadata": meta}]}).encode()
