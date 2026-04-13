@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.38] — 2026-04-12
+
+### Added
+- **Structural hunk capture on `file_edit` and `git_commit`** — watcher parses `@@ -old,count +new,count @@` headers from `git diff --unified=0` and `git show --format= --unified=0 <sha>` and emits them as `hunks: [{old_start, old_count, new_start, new_count}, ...]` on `file_edit` metadata and `file_hunks: {path: [hunks, ...]}` on `git_commit` metadata. Pure range data — no code content, no identifiers. Stays inside the structural-capture boundary alongside `lines_added` / `lines_removed`.
+- **Journal-mode hunk content** — when `code_capture` consent is on (Pro tier, journal mode), each hunk additionally carries a `lines: ["+foo", "-bar", ...]` field with the actual diff lines for that hunk, capped at 2000 lines per event. Gated by the same consent flag that gates the raw `diff` field.
+- **`base.is_content_captured()`** — public helper in `methodproof/agents/base.py` exposing the `code_capture` capture-flag check so agents can decide what content to include without reaching into private module state.
+
+### Why
+Enables the platform's post-processing pipeline to distinguish `SUPERSEDES` (later commit replaces 100% of an earlier commit's added lines on each shared path) from `EXTENSION_TO` (anything less — the default) without ever needing the raw diff content. See `methodproof` changelog v0.6.30.
+
 ## [0.7.37] — 2026-04-12
 
 ### Changed

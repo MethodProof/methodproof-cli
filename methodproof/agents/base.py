@@ -125,6 +125,13 @@ def log(level: str, event: str, **kw: object) -> None:
     sys.stderr.write(json.dumps(entry, default=str) + "\n")
 
 
+def is_content_captured() -> bool:
+    """True when code_capture consent is on (journal/Pro mode). Agents use this
+    to decide whether to include line-level diff content alongside structural
+    metadata."""
+    return bool(_capture.get("code_capture", False))
+
+
 def emit(event_type: str, metadata: dict[str, Any]) -> None:
     if not _initialized:
         log("warning", "emit.before_init", type=event_type)

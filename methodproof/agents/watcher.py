@@ -46,6 +46,99 @@ IGNORE_PATTERNS = re.compile(
 
 
 _MAX_DIFF_BYTES = 50_000
+_MAX_HUNK_LINES = 2_000
+
+_HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+_DIFF_FILE_RE = re.compile(r"^diff --git a/(.+?) b/(.+?)$")
+
+
+def _parse_hunks(diff_text: str, include_lines: bool) -> list[dict[str, object]]:
+    """Parse unified diff text into structured hunks.
+
+    Each hunk: {old_start, old_count, new_start, new_count, [lines]}.
+    Lines are only included when `include_lines` is True (journal / code_capture).
+    """
+    hunks: list[dict[str, object]] = []
+    current: dict[str, object] | None = None
+    total_lines = 0
+    for line in diff_text.splitlines():
+        header = _HUNK_HEADER_RE.match(line)
+        if header:
+            if current is not None:
+                hunks.append(current)
+            current = {
+                "old_start": int(header.group(1)),
+                "old_count": int(header.group(2) or 1),
+                "new_start": int(header.group(3)),
+                "new_count": int(header.group(4) or 1),
+            }
+            if include_lines:
+                current["lines"] = []
+            continue
+        if current is None or not include_lines:
+            continue
+        if not (line.startswith("+") or line.startswith("-")):
+            continue
+        if line.startswith("+++") or line.startswith("---"):
+            continue
+        if total_lines >= _MAX_HUNK_LINES:
+            continue
+        current["lines"].append(line)  # type: ignore[union-attr]
+        total_lines += 1
+    if current is not None:
+        hunks.append(current)
+    return hunks
+
+
+def _parse_show_hunks(
+    show_text: str, include_lines: bool,
+) -> dict[str, list[dict[str, object]]]:
+    """Split `git show --unified=0` output by file and parse hunks per file."""
+    file_hunks: dict[str, list[dict[str, object]]] = {}
+    current_path: str | None = None
+    buffer: list[str] = []
+
+    def _flush() -> None:
+        if current_path and buffer:
+            file_hunks[current_path] = _parse_hunks("\n".join(buffer), include_lines)
+
+    for line in show_text.splitlines():
+        m = _DIFF_FILE_RE.match(line)
+        if m:
+            _flush()
+            current_path = m.group(2)
+            buffer = []
+            continue
+        if current_path is not None:
+            buffer.append(line)
+    _flush()
+    return file_hunks
+
+
+def _git_diff_hunks(repo: str, path: str, include_lines: bool) -> list[dict[str, object]]:
+    """Structured hunks for a pending file_edit. Ranges always; line content when allowed."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", repo, "diff", "--unified=0", "--", path],
+            capture_output=True, text=True, timeout=5,
+        )
+        return _parse_hunks(result.stdout[:_MAX_DIFF_BYTES], include_lines)
+    except Exception:
+        return []
+
+
+def _git_show_file_hunks(
+    repo: str, sha: str, include_lines: bool,
+) -> dict[str, list[dict[str, object]]]:
+    """Per-file structured hunks for a commit."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", repo, "show", "--format=", "--unified=0", sha],
+            capture_output=True, text=True, timeout=10,
+        )
+        return _parse_show_hunks(result.stdout[:_MAX_DIFF_BYTES * 4], include_lines)
+    except Exception:
+        return {}
 
 
 def _git_diff_stats(repo: str, path: str) -> tuple[int, int]:
@@ -125,10 +218,14 @@ class _Handler(FileSystemEventHandler):
 
         added, removed = _git_diff_stats(self._root, path)
         lang = Path(event.src_path).suffix.lstrip(".")
+        include_lines = base.is_content_captured()
+        hunks = _git_diff_hunks(self._root, path, include_lines)
         meta: dict[str, object] = {
             "path": path, "language": lang,
             "lines_added": added, "lines_removed": removed,
         }
+        if hunks:
+            meta["hunks"] = hunks
         diff = _git_diff_content(self._root, path)
         if diff:
             meta["diff"] = diff
@@ -192,6 +289,10 @@ def _log_commit(watch_dir: str, sha: str) -> None:
         meta["parent_hash"] = parent_hash
     if body and body != subject:
         meta["body"] = body[:2000]
+    include_lines = base.is_content_captured()
+    file_hunks = _git_show_file_hunks(watch_dir, sha, include_lines)
+    if file_hunks:
+        meta["file_hunks"] = file_hunks
     diff = _git_show_diff(watch_dir, sha)
     if diff:
         meta["diff"] = diff
