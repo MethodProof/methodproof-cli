@@ -14,8 +14,17 @@ def sync_metadata(session: dict[str, Any], token: str, api_url: str) -> None:
     remote_id = session.get("remote_id")
     if not remote_id:
         return
+    watch_dir = session.get("watch_dir")
+    posted_urls: set[str] = set()
+    if watch_dir:
+        from methodproof import repos as _repos
+        for entry in _repos.enumerate_sub_repos(watch_dir):
+            _request("POST", f"/sessions/{remote_id}/repos", api_url, token,
+                     {"remote_url": entry["remote_url"], "rel_path": entry["rel_path"],
+                      "detected_by": "cli"})
+            posted_urls.add(entry["remote_url"])
     repo_url = session.get("repo_url")
-    if repo_url:
+    if repo_url and repo_url not in posted_urls:
         _request("POST", f"/sessions/{remote_id}/repos", api_url, token,
                  {"remote_url": repo_url, "detected_by": "cli"})
     tags = json.loads(session.get("tags") or "[]")
