@@ -108,9 +108,19 @@ def init(session_id: str, live: bool = False, verbose: bool = False, streaming: 
     _verbose = verbose
     _streaming = streaming
     _prev_hash = "genesis"
-    from methodproof import config
+    from methodproof import config, store
     cfg = config.load()
     _e2e_key = _load_encryption_key(cfg)
+    # Daemon is a fresh process — wire the SQLCipher key (always master-derived
+    # db_key, never user E2E) into the store before any DB write.
+    if store._encrypted_flag_path().exists():
+        account_id = cfg.get("account_id", "")
+        if account_id and cfg.get("master_key_fingerprint"):
+            from methodproof.keychain import load_secret
+            from methodproof.kdf import derive_master, derive_db_key
+            entropy = load_secret(account_id)
+            if entropy:
+                store.set_db_key(derive_db_key(derive_master(entropy), account_id))
     _capture = cfg.get("capture", {})
     _journal_mode = cfg.get("journal_mode", False)
     _account_id = cfg.get("account_id", "")

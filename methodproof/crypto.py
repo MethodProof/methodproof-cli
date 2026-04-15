@@ -44,3 +44,20 @@ def encrypt_metadata(metadata: dict, key: bytes) -> dict:
         if field in metadata and isinstance(metadata[field], str):
             metadata[field] = encrypt_field(metadata[field], key)
     return metadata
+
+
+def decrypt_metadata_safe(metadata: dict, key: bytes) -> dict:
+    """Decrypt sensitive fields in place. Silently leaves fields that fail
+    (wrong key, tampering) as ciphertext — never raises. Used on the read path
+    where a field encrypted with a *different* key (user E2E vs master) must
+    still render as-is rather than break rendering."""
+    if AESGCM is None:
+        return metadata
+    for field in SENSITIVE_FIELDS:
+        val = metadata.get(field)
+        if isinstance(val, str) and val.startswith("e2e:v1:"):
+            try:
+                metadata[field] = decrypt_field(val, key)
+            except Exception:
+                pass
+    return metadata

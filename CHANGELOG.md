@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.8.0] — 2026-04-15
+
+### Added
+- **SQLCipher encryption-at-rest for the local database** — the CLI's SQLite store is now transparently re-keyed with SQLCipher on first login, layered underneath the existing field-level AES on sensitive metadata. The db_key is derived from the master entropy via HKDF (`derive_master` → `derive_db_key`), never leaves the OS keychain, and is wired into `store._db()` via `PRAGMA key` before any other statement.
+- **One-shot plaintext → encrypted migration** — `migrate_db.migrate_to_sqlcipher()` uses the `sqlcipher_export()` recipe, row-count-verifies every table, atomically swaps the original DB to `methodproof.db.plaintext.bak` (kept for recovery), cleans up stale WAL/SHM artifacts, and writes a `methodproof.db.encrypted` sentinel. Runs once on first login for existing users, idempotent on re-run.
+- **Daemon-liveness guard** — `DaemonActiveError` is raised if a recording daemon is still holding FDs on the plaintext DB. Callers must `mp stop` first.
+- **`mp e2e release-all`** — releases every synced session with E2E-encrypted fields in one pass. Skips sessions with nothing to release, reports released/skipped/failed counts.
+- **`decrypt_metadata_safe`** — new read-path helper in `crypto.py` that silently leaves fields encrypted with a different key (user E2E vs master) as ciphertext, so mixed-key sessions render correctly without crashing.
+- **Auto-decrypt on read** — `store.get_events(decrypt=True)` and `get_session_events` now auto-decrypt sensitive metadata when the master db_key is available in the keychain. Sync push and `e2e release` still read ciphertext verbatim (`decrypt=False`).
+
+### Fixed
+- **`mp push` crash on multi-session list** — `s["created_at"]` is stored as SQLite `REAL` (float epoch), but the unsynced-session listing sliced it as an ISO string and raised `TypeError: 'float' object is not subscriptable`. Now formatted with `datetime.fromtimestamp(...).strftime("%Y-%m-%d")`.
+
+### Why
+Field-level AES protects six sensitive metadata fields, but everything else (event types, timestamps, file paths, session structure) sat in plaintext SQLite on disk. SQLCipher closes that gap without changing the API surface: `sqlcipher3.dbapi2` is drop-in compatible with stdlib `sqlite3`, so the rest of the store is unchanged. The two layers compose: SQLCipher protects data at rest end-to-end, field-level AES adds defense-in-depth for the most sensitive fields even if the db_key is compromised.
+
 ## [0.7.38] — 2026-04-12
 
 ### Added

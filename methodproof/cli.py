@@ -985,14 +985,26 @@ def _setup_master_key(cfg: dict) -> None:
     if not account_id:
         return
     from methodproof.keychain import has_secret, store_secret, load_secret
+    from methodproof import store as _store
     if has_secret(account_id):
-        # Already set up — ensure fingerprint is in config
+        # Already set up — ensure fingerprint is in config and key is wired
+        from methodproof.kdf import derive_master, derive_db_key
+        from methodproof.crypto import fingerprint
+        master = derive_master(load_secret(account_id))
+        db_key = derive_db_key(master, account_id)
         if not cfg.get("master_key_fingerprint"):
-            from methodproof.kdf import derive_master, derive_db_key
-            from methodproof.crypto import fingerprint
-            master = derive_master(load_secret(account_id))
-            cfg["master_key_fingerprint"] = fingerprint(derive_db_key(master, account_id))
+            cfg["master_key_fingerprint"] = fingerprint(db_key)
             config.save(cfg)
+        if _store._encrypted_flag_path().exists():
+            _store.set_db_key(db_key)
+        else:
+            # Existing user, plaintext DB — one-shot upgrade to SQLCipher
+            from methodproof.migrate_db import migrate_to_sqlcipher, DaemonActiveError
+            try:
+                if migrate_to_sqlcipher(db_key):
+                    print("  Encrypted local database with SQLCipher.\n")
+            except DaemonActiveError as exc:
+                print(f"  ⚠ {exc}")
         return
 
     # Check if user has a recovery phrase (returning user, new device)
@@ -1025,12 +1037,20 @@ def _setup_master_key(cfg: dict) -> None:
     print(f"  │  {D}on a new device. Store it somewhere safe.{R}      │")
     print(f"  └──────────────────────────────────────────────────┘\n")
 
-    # Encrypt any existing plaintext events
+    # Encrypt any existing plaintext events (field-level, defense-in-depth)
     db_key = derive_db_key(master, account_id)
-    from methodproof.migrate_db import migrate_encrypt
+    from methodproof.migrate_db import migrate_encrypt, migrate_to_sqlcipher
     count = migrate_encrypt(db_key)
     if count:
         print(f"  Encrypted {count} existing events.\n")
+
+    # Whole-database SQLCipher encryption — runs once, idempotent
+    from methodproof.migrate_db import DaemonActiveError
+    try:
+        if migrate_to_sqlcipher(db_key):
+            print("  Encrypted local database with SQLCipher.\n")
+    except DaemonActiveError as exc:
+        print(f"  ⚠ {exc}")
 
 
 def _recover_master_key(cfg: dict, account_id: str) -> None:
@@ -1049,7 +1069,53 @@ def _recover_master_key(cfg: dict, account_id: str) -> None:
         return
     from methodproof.keychain import store_secret
     store_secret(account_id, entropy)
+    # Wire the recovered key into the SQLCipher connection so the next DB read works
+    from methodproof.kdf import derive_master, derive_db_key
+    from methodproof import store as _store
+    if _store._encrypted_flag_path().exists():
+        _store.set_db_key(derive_db_key(derive_master(entropy), account_id))
     print("  Master key restored.\n")
+
+
+def _wire_db_encryption(cfg: dict) -> None:
+    """Wire the SQLCipher key into store before any subcommand touches the DB.
+
+    Called once at the top of `main()`. Three cases:
+      1. Encrypted DB + key available → wire the key.
+      2. Plaintext DB + logged-in user with master key → one-shot upgrade
+         migration to SQLCipher (the post-release upgrade path).
+      3. Anything else (logged out, no key) → no-op; capture continues against
+         the plaintext DB until the user logs in.
+    """
+    from methodproof import store as _store
+    account_id = cfg.get("account_id", "")
+    if not account_id:
+        return
+    try:
+        from methodproof.keychain import load_secret
+        from methodproof.kdf import derive_master, derive_db_key
+        entropy = load_secret(account_id)
+        if not entropy:
+            return
+        db_key = derive_db_key(derive_master(entropy), account_id)
+    except Exception:
+        return
+
+    if _store._encrypted_flag_path().exists():
+        _store.set_db_key(db_key)
+        return
+
+    # Plaintext DB + key available — one-shot upgrade
+    try:
+        from methodproof.migrate_db import migrate_to_sqlcipher, DaemonActiveError
+        if migrate_to_sqlcipher(db_key):
+            print("  Encrypted local database with SQLCipher.\n")
+    except DaemonActiveError:
+        # Daemon is recording — defer migration to next CLI run after `mp stop`.
+        # Don't print noise on every command; the upgrade will happen later.
+        return
+    except Exception as exc:
+        sys.stderr.write(f"[methodproof] sqlcipher migration deferred: {exc}\n")
 
 
 def _is_daemon_alive() -> bool:
@@ -1844,7 +1910,7 @@ def cmd_push(args: argparse.Namespace) -> None:
     print(f"Found {len(unsynced)} unsynced sessions:\n")
     for s in unsynced:
         events = len(store.get_events(s["id"]))
-        date = s["created_at"][:10] if s.get("created_at") else "?"
+        date = datetime.fromtimestamp(s["created_at"]).strftime("%Y-%m-%d") if s.get("created_at") else "?"
         print(f"  {s['id'][:8]}  {date}  {events} events")
     print()
     answer = input(f"Push all {len(unsynced)}? [Y/n] ").strip().lower()
@@ -2342,6 +2408,7 @@ def main() -> None:
     e2e_sub.add_parser("recover", help="Recover key from passphrase")
     e2e_rel = e2e_sub.add_parser("release", help="Release a session from E2E encryption")
     e2e_rel.add_argument("session_id", help="Session ID to release")
+    e2e_sub.add_parser("release-all", help="Release every synced session from E2E encryption")
     sub.add_parser("intro", help="Show the MethodProof intro")
     sub.add_parser("help", help="Show command reference")
     sub.add_parser("mcp-serve", help="Run MCP server (used by Claude Code)")
@@ -2381,5 +2448,6 @@ def main() -> None:
         _update_check()
 
     if args.cmd not in ("help", "update"):
+        _wire_db_encryption(config.load())
         store.init_db()
     fn(args)

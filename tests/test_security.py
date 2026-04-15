@@ -16,7 +16,7 @@ from methodproof.bip39 import entropy_to_phrase, phrase_to_entropy
 from methodproof.crypto import SENSITIVE_FIELDS, decrypt_field, encrypt_field, encrypt_metadata
 from methodproof.integrity import compute_event_hash
 from methodproof.kdf import derive_bind_key, derive_db_key, derive_master
-from methodproof.migrate_db import migrate_encrypt
+from methodproof.migrate_db import migrate_encrypt, migrate_to_sqlcipher
 
 
 # ── Fixtures ──
@@ -284,6 +284,107 @@ def test_migrate_skips_non_sensitive():
     ])
     key = derive_db_key(derive_master(os.urandom(16)), "a")
     assert migrate_encrypt(key) == 0
+
+
+# ── 7b. SQLCipher whole-database encryption ──
+
+
+def _seed_session_with_events(n: int = 3) -> str:
+    sid = uuid.uuid4().hex
+    store.create_session(sid, "/tmp")
+    store.insert_events(sid, [
+        {"id": f"e{i}", "type": "user_prompt", "timestamp": float(i),
+         "metadata": {"prompt_text": f"hello {i}", "len": i}}
+        for i in range(n)
+    ])
+    return sid
+
+
+def _fresh_db_key() -> bytes:
+    return derive_db_key(derive_master(os.urandom(16)), "test-account")
+
+
+def test_migrate_to_sqlcipher_preserves_rows():
+    sid = _seed_session_with_events(5)
+    key = _fresh_db_key()
+
+    assert migrate_to_sqlcipher(key) is True
+    assert store._encrypted_flag_path().exists()
+    assert config.DB_PATH.with_suffix(".db.plaintext.bak").exists()
+
+    rows = store._db().execute(
+        "SELECT id, metadata FROM events WHERE session_id = ?", (sid,)
+    ).fetchall()
+    assert len(rows) == 5
+    metas = [store._decompress_meta(r["metadata"]) for r in rows]
+    assert {m["prompt_text"] for m in metas} == {f"hello {i}" for i in range(5)}
+
+
+def test_db_unreadable_with_stdlib_after_migration():
+    _seed_session_with_events(2)
+    key = _fresh_db_key()
+    migrate_to_sqlcipher(key)
+
+    import sqlite3 as stdlib
+    with pytest.raises(stdlib.DatabaseError):
+        plain = stdlib.connect(str(config.DB_PATH))
+        plain.execute("SELECT count(*) FROM events").fetchone()
+
+
+def test_migrate_to_sqlcipher_idempotent():
+    _seed_session_with_events(2)
+    key = _fresh_db_key()
+    assert migrate_to_sqlcipher(key) is True
+    # Second call sees the flag and short-circuits
+    assert migrate_to_sqlcipher(key) is False
+
+
+def test_set_db_key_resets_connection():
+    _seed_session_with_events(1)
+    # Touch the DB to populate the connection cache
+    store._db().execute("SELECT 1").fetchone()
+    assert store._conn is not None
+    store.set_db_key(_fresh_db_key())
+    assert store._conn is None
+
+
+def test_db_open_without_key_after_encryption_raises():
+    _seed_session_with_events(1)
+    key = _fresh_db_key()
+    migrate_to_sqlcipher(key)
+    # Simulate a fresh process: forget the key, force the next _db() to re-open
+    store._db_key = None
+    store.reset_connection()
+    with pytest.raises(RuntimeError, match="encrypted database requires master key"):
+        store._db()
+
+
+def test_migrate_to_sqlcipher_refuses_when_daemon_active(monkeypatch):
+    from methodproof.migrate_db import DaemonActiveError
+    import methodproof.migrate_db as mdb
+    _seed_session_with_events(1)
+    monkeypatch.setattr(mdb, "_daemon_alive", lambda: True)
+    with pytest.raises(DaemonActiveError):
+        migrate_to_sqlcipher(_fresh_db_key())
+    # DB should still be plaintext / no flag file
+    assert not store._encrypted_flag_path().exists()
+
+
+def test_migrate_to_sqlcipher_with_no_existing_db():
+    # Fresh install, never written
+    if config.DB_PATH.exists():
+        store.reset_connection()
+        config.DB_PATH.unlink()
+    key = _fresh_db_key()
+    assert migrate_to_sqlcipher(key) is True
+    assert store._encrypted_flag_path().exists()
+    # Should now be openable in encrypted mode and accept new writes
+    store.init_db()
+    sid = _seed_session_with_events(1)
+    rows = store._db().execute(
+        "SELECT count(*) FROM events WHERE session_id = ?", (sid,)
+    ).fetchone()
+    assert rows[0] == 1
 
 
 # ── 8. Lock / Purge ──

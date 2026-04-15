@@ -1,14 +1,61 @@
-"""SQLite store — sessions, events, graph relationships."""
+"""SQLite store — sessions, events, graph relationships.
+
+Database backend is SQLCipher (via the `sqlcipher3` package). It is API-compatible
+with stdlib `sqlite3`, so the rest of this module is unchanged. Files are stored
+plaintext until the user logs in for the first time, at which point
+`migrate_db.migrate_to_sqlcipher()` re-keys the DB with the master-derived
+db_key and writes a `.encrypted` sentinel file."""
 
 import json
 import os
-import sqlite3
 import time
 import uuid
 import zlib
 from typing import Any
 
+from sqlcipher3 import dbapi2 as sqlite3
+
 from methodproof import config
+
+_DB_KEY_CACHE: bytes | None = None
+_DB_KEY_LOADED = False
+_db_key: bytes | None = None  # Set by set_db_key() once the master key is loaded.
+
+
+def _encrypted_flag_path():
+    return config.DIR / "methodproof.db.encrypted"
+
+
+def set_db_key(key: bytes) -> None:
+    """Wire the master-derived db_key into the connection factory. Subsequent
+    `_db()` calls open with `PRAGMA key`. Resets the cached connection so the
+    new key takes effect immediately."""
+    global _db_key
+    _db_key = key
+    reset_connection()
+
+
+def _try_load_db_key() -> bytes | None:
+    """Lazy-load the master-derived db_key from OS keychain. Memoized.
+    Returns None if not logged in, key missing, or cryptography unavailable."""
+    global _DB_KEY_CACHE, _DB_KEY_LOADED
+    if _DB_KEY_LOADED:
+        return _DB_KEY_CACHE
+    _DB_KEY_LOADED = True
+    try:
+        from methodproof import keychain
+        from methodproof.kdf import derive_master, derive_db_key
+        cfg = config.load()
+        account_id = cfg.get("account_id", "")
+        if not account_id:
+            return None
+        entropy = keychain.load_secret(account_id)
+        if not entropy:
+            return None
+        _DB_KEY_CACHE = derive_db_key(derive_master(entropy), account_id)
+        return _DB_KEY_CACHE
+    except Exception:
+        return None
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -79,7 +126,16 @@ def _sqlite_decompress(raw: bytes | str | None) -> str | None:
 def _db() -> sqlite3.Connection:
     global _conn
     if _conn is None:
+        encrypted = _encrypted_flag_path().exists()
+        if encrypted and _db_key is None:
+            raise RuntimeError(
+                "encrypted database requires master key — run `mp login` "
+                "or `mp e2e recover` to unlock"
+            )
         _conn = sqlite3.connect(str(config.DB_PATH), check_same_thread=False, timeout=10)
+        if _db_key is not None:
+            # SQLCipher: PRAGMA key must run before any other statement
+            _conn.execute(f"PRAGMA key = \"x'{_db_key.hex()}'\"")
         _conn.execute("PRAGMA journal_mode=WAL")
         _conn.row_factory = sqlite3.Row
         _conn.create_function("mp_json", 1, _sqlite_decompress)
@@ -234,21 +290,31 @@ def list_sessions() -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def get_events(session_id: str) -> list[dict[str, Any]]:
+def get_events(session_id: str, decrypt: bool = False) -> list[dict[str, Any]]:
+    """Return events for a session. If `decrypt=True`, sensitive fields are
+    decrypted in place when the master db_key is available in the keychain.
+    Callers that need ciphertext verbatim (sync push, e2e release) must leave
+    `decrypt=False`."""
     rows = _db().execute(
         "SELECT * FROM events WHERE session_id = ? ORDER BY timestamp",
         (session_id,),
     ).fetchall()
+    key = _try_load_db_key() if decrypt else None
     result = []
     for r in rows:
         d = dict(r)
-        d["metadata"] = json.dumps(_decompress_meta(d["metadata"]))
+        meta = _decompress_meta(d["metadata"])
+        if key is not None:
+            from methodproof.crypto import decrypt_metadata_safe
+            decrypt_metadata_safe(meta, key)
+        d["metadata"] = json.dumps(meta)
         result.append(d)
     return result
 
 
 def get_session_events(session_id: str, after_id: str = "") -> list[dict[str, Any]]:
-    """Return events for session, optionally after a given event ID (for TUI polling)."""
+    """Return events for session, optionally after a given event ID (for TUI polling).
+    Auto-decrypts sensitive fields when the master db_key is in the keychain."""
     db = _db()
     if after_id:
         row = db.execute("SELECT rowid FROM events WHERE id = ?", (after_id,)).fetchone()
@@ -259,11 +325,16 @@ def get_session_events(session_id: str, after_id: str = "") -> list[dict[str, An
         "SELECT rowid, * FROM events WHERE session_id = ? AND rowid > ? ORDER BY rowid",
         (session_id, after_rowid),
     ).fetchall()
+    key = _try_load_db_key()
     result = []
     for r in rows:
         d = dict(r)
         d["ts"] = d.pop("timestamp", 0)
-        d["metadata"] = _decompress_meta(d["metadata"])
+        meta = _decompress_meta(d["metadata"])
+        if key is not None:
+            from methodproof.crypto import decrypt_metadata_safe
+            decrypt_metadata_safe(meta, key)
+        d["metadata"] = meta
         result.append(d)
     return result
 

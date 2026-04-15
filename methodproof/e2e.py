@@ -223,11 +223,35 @@ def _cmd_recover(cfg: dict) -> None:
     print(f"Key recovered and stored in OS keychain (fingerprint: {fp}).")
 
 
-def _cmd_release(cfg: dict, session_id: str) -> None:
-    """Release a session from E2E encryption."""
-    from methodproof import keychain
+def _release_session(session_id: str, remote_id: str, e2e_key: bytes,
+                     api_url: str, token: str) -> int:
+    """Decrypt and upload one session. Returns decrypted event count (0 = nothing to do)."""
     from methodproof.crypto import decrypt_field, SENSITIVE_FIELDS
     from methodproof.sync import _request
+
+    decrypted_events = []
+    for ev in store.get_events(session_id):
+        meta = json.loads(ev.get("metadata", "{}"))
+        changed = False
+        for field in SENSITIVE_FIELDS:
+            val = meta.get(field, "")
+            if isinstance(val, str) and val.startswith("e2e:v1:"):
+                meta[field] = decrypt_field(val, e2e_key)
+                changed = True
+        if changed:
+            decrypted_events.append({"event_id": ev["id"], "metadata": meta})
+
+    if not decrypted_events:
+        return 0
+
+    _request("POST", f"/personal/sessions/{remote_id}/release-e2e", api_url, token,
+             {"events": decrypted_events})
+    return len(decrypted_events)
+
+
+def _load_release_context(cfg: dict) -> tuple[bytes, str, str]:
+    """Return (e2e_key, api_url, token) or exit with a clear error."""
+    from methodproof import keychain
 
     token = cfg.get("token", "")
     api_url = cfg.get("api_url", "")
@@ -235,50 +259,68 @@ def _cmd_release(cfg: dict, session_id: str) -> None:
     if not token:
         print("Release requires login. Run `methodproof login` first.")
         sys.exit(1)
-
     e2e_key = keychain.load_secret(f"e2e:{account_id}")
     if not e2e_key:
         print("E2E key not found in keychain. Run `mp e2e recover` first.")
         sys.exit(1)
+    return e2e_key, api_url, token
 
-    events = store.get_events(session_id)
-    if not events:
+
+def _cmd_release(cfg: dict, session_id: str) -> None:
+    """Release a session from E2E encryption."""
+    e2e_key, api_url, token = _load_release_context(cfg)
+
+    if not store.get_events(session_id):
         print(f"No events found for session {session_id}.")
         sys.exit(1)
 
-    decrypted_events = []
-    for ev in events:
-        meta = json.loads(ev.get("metadata", "{}"))
-        has_encrypted = False
-        for field in SENSITIVE_FIELDS:
-            val = meta.get(field, "")
-            if isinstance(val, str) and val.startswith("e2e:v1:"):
-                meta[field] = decrypt_field(val, e2e_key)
-                has_encrypted = True
-        if has_encrypted:
-            decrypted_events.append({"event_id": ev["id"], "metadata": meta})
-
-    if not decrypted_events:
-        print("No encrypted fields found in this session.")
-        return
-
-    # Resolve remote_id
-    sessions = store.list_sessions()
     remote_id = None
-    for s in sessions:
+    for s in store.list_sessions():
         if s["id"] == session_id or (s.get("remote_id") and s["id"].startswith(session_id)):
             remote_id = s.get("remote_id")
             session_id = s["id"]
             break
-
     if not remote_id:
         print("Session not synced to platform. Push first with `mp push`.")
         sys.exit(1)
 
-    _request("POST", f"/personal/sessions/{remote_id}/release-e2e", api_url, token,
-             {"events": decrypted_events})
-    print(f"Session released ({len(decrypted_events)} events decrypted).")
+    count = _release_session(session_id, remote_id, e2e_key, api_url, token)
+    if not count:
+        print("No encrypted fields found in this session.")
+        return
+    print(f"Session released ({count} events decrypted).")
     print("Narration will be generated shortly.")
+
+
+def _cmd_release_all(cfg: dict) -> None:
+    """Release every synced session that still has E2E-encrypted fields."""
+    e2e_key, api_url, token = _load_release_context(cfg)
+
+    sessions = [s for s in store.list_sessions() if s.get("remote_id")]
+    if not sessions:
+        print("No synced sessions found. Push first with `mp push`.")
+        return
+
+    released = skipped = failed = total_events = 0
+    for s in sessions:
+        sid, rid = s["id"], s["remote_id"]
+        try:
+            count = _release_session(sid, rid, e2e_key, api_url, token)
+        except Exception as exc:
+            failed += 1
+            print(f"  {sid[:8]}  FAILED ({exc})")
+            continue
+        if count:
+            released += 1
+            total_events += count
+            print(f"  {sid[:8]}  released ({count} events)")
+        else:
+            skipped += 1
+
+    print(f"\nReleased {released} sessions ({total_events} events). "
+          f"Skipped {skipped}. Failed {failed}.")
+    if released:
+        print("Narration will be generated shortly.")
 
 
 def cmd_e2e(args: argparse.Namespace) -> None:
@@ -300,5 +342,7 @@ def cmd_e2e(args: argparse.Namespace) -> None:
             print("Usage: methodproof e2e release <session-id>")
             sys.exit(1)
         _cmd_release(cfg, session_id)
+    elif subcmd == "release-all":
+        _cmd_release_all(cfg)
     else:
-        print("Usage: methodproof e2e [on|off|status|recover|release <session-id>]")
+        print("Usage: methodproof e2e [on|off|status|recover|release <session-id>|release-all]")

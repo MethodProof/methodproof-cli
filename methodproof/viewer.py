@@ -10,7 +10,7 @@ SENSITIVE_FIELDS = {"prompt_text", "response_text", "command", "output_snippet",
 
 def view(session: dict[str, Any]) -> None:
     sid = session["id"]
-    events = store.get_events(sid)
+    events = store.get_events(sid, decrypt=True)
     cfg = config.load()
     capture = cfg.get("capture", {})
     active = [k for k, v in capture.items() if v]
