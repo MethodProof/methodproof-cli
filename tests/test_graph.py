@@ -93,15 +93,16 @@ def test_led_to_link() -> None:
     assert db.execute("SELECT count(*) FROM causal_links WHERE type='LED_TO'").fetchone()[0] == 1
 
 
-def test_no_link_outside_window() -> None:
-    """completion → edit >60s apart → no INFORMED."""
+def test_informed_bounded_by_next_completion() -> None:
+    """Edit after a second completion links only to the second."""
     sid = _session([
         _event("llm_completion", 100, {"model": "claude"}),
-        _event("file_edit", 200, {"path": "a.py"}),  # 100s gap
+        _event("llm_completion", 200, {"model": "claude"}),
+        _event("file_edit", 250, {"path": "a.py"}),
     ])
     graph.build(sid)
     db = store._db()
-    assert db.execute("SELECT count(*) FROM causal_links WHERE type='INFORMED'").fetchone()[0] == 0
+    assert db.execute("SELECT count(*) FROM causal_links WHERE type='INFORMED'").fetchone()[0] == 1
 
 
 def test_resource_creation() -> None:

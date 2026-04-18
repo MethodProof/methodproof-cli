@@ -36,20 +36,19 @@ def build(session_id: str) -> dict[str, int]:
     db.execute(
         "DELETE FROM causal_links WHERE source_id IN "
         "(SELECT id FROM events WHERE session_id = ?)", (session_id,))
-    stats["causal"] += _link(db, session_id, "llm_prompt", "llm_completion",
-                              "RECEIVED", 60, match_model=True)
-    stats["causal"] += _link(db, session_id, "llm_completion", "file_edit",
-                              "INFORMED", 60)
-    stats["causal"] += _link(db, session_id, "web_search", "web_visit",
-                              "LED_TO", 120)
-    stats["causal"] += _link(db, session_id, "browser_search", "browser_visit",
-                              "LED_TO", 120)
+    stats["causal"] += _link_nearest(db, session_id, "llm_prompt",
+                                      "llm_completion", "RECEIVED", "model")
+    stats["causal"] += _link_until_next(db, session_id, "llm_completion",
+                                         "file_edit", "INFORMED")
+    stats["causal"] += _link_until_next(db, session_id, "web_search",
+                                         "web_visit", "LED_TO")
+    stats["causal"] += _link_until_next(db, session_id, "browser_search",
+                                         "browser_visit", "LED_TO")
     stats["causal"] += _link_pasted(db, session_id)
-    # Agent causal links (OpenClaw / agent gateways)
-    stats["causal"] += _link(db, session_id, "agent_prompt", "agent_completion",
-                              "RECEIVED", 120, match_model=True)
-    stats["causal"] += _link(db, session_id, "agent_completion", "file_edit",
-                              "INFORMED", 60)
+    stats["causal"] += _link_nearest(db, session_id, "agent_prompt",
+                                      "agent_completion", "RECEIVED", "model")
+    stats["causal"] += _link_until_next(db, session_id, "agent_completion",
+                                         "file_edit", "INFORMED")
 
     # Resources
     for e in events:
@@ -95,39 +94,87 @@ def build(session_id: str) -> dict[str, int]:
     return stats
 
 
-def _link(
+def _link_nearest(
     db: object, sid: str, src_type: str, tgt_type: str,
-    rel: str, window_sec: int, match_model: bool = False,
+    rel: str, match_field: str | None = None,
 ) -> int:
-    model_clause = (
-        "AND json_extract(mp_json(s.metadata), '$.model') = json_extract(mp_json(t.metadata), '$.model')"
-        if match_model else ""
-    )
-    sql = f"""
-    INSERT OR IGNORE INTO causal_links (source_id, target_id, type)
-    SELECT s.id, t.id, ?
-    FROM events s JOIN events t ON t.session_id = s.session_id
-    WHERE s.session_id = ? AND s.type = ? AND t.type = ?
-      AND t.timestamp > s.timestamp
-      AND (t.timestamp - s.timestamp) <= ?
-      {model_clause}
-    """
-    return db.execute(sql, (rel, sid, src_type, tgt_type, window_sec)).rowcount
+    """1:1 nearest-neighbor pairing. No time window."""
+    rows = db.execute(
+        "SELECT id, type, timestamp, metadata FROM events "
+        "WHERE session_id = ? AND type IN (?, ?) ORDER BY timestamp",
+        (sid, src_type, tgt_type),
+    ).fetchall()
+    claimed: set[str] = set()
+    pairs: list[tuple[str, str, str]] = []
+    for src in rows:
+        if src["type"] != src_type:
+            continue
+        src_val = _decompress_meta(src["metadata"]).get(match_field) if match_field else None
+        for tgt in rows:
+            if tgt["type"] != tgt_type or tgt["id"] in claimed or tgt["timestamp"] <= src["timestamp"]:
+                continue
+            if match_field and _decompress_meta(tgt["metadata"]).get(match_field) != src_val:
+                continue
+            pairs.append((src["id"], tgt["id"], rel))
+            claimed.add(tgt["id"])
+            break
+    if pairs:
+        db.executemany(
+            "INSERT OR IGNORE INTO causal_links (source_id, target_id, type) "
+            "VALUES (?, ?, ?)", pairs)
+    return len(pairs)
+
+
+def _link_until_next(
+    db: object, sid: str, src_type: str, tgt_type: str, rel: str,
+) -> int:
+    """Link source to all targets until the next source event."""
+    rows = db.execute(
+        "SELECT id, type FROM events "
+        "WHERE session_id = ? AND type IN (?, ?) ORDER BY timestamp",
+        (sid, src_type, tgt_type),
+    ).fetchall()
+    pairs: list[tuple[str, str, str]] = []
+    current_src: str | None = None
+    for ev in rows:
+        if ev["type"] == src_type:
+            current_src = ev["id"]
+        elif current_src:
+            pairs.append((current_src, ev["id"], rel))
+    if pairs:
+        db.executemany(
+            "INSERT OR IGNORE INTO causal_links (source_id, target_id, type) "
+            "VALUES (?, ?, ?)", pairs)
+    return len(pairs)
 
 
 def _link_pasted(db: object, sid: str) -> int:
-    """browser_copy → file_edit: ≤30s, content length within 20%."""
-    sql = """
-    INSERT OR IGNORE INTO causal_links (source_id, target_id, type, confidence)
-    SELECT s.id, t.id, 'PASTED_FROM', 0.7
-    FROM events s JOIN events t ON t.session_id = s.session_id
-    WHERE s.session_id = ? AND s.type = 'browser_copy' AND t.type = 'file_edit'
-      AND t.timestamp > s.timestamp AND (t.timestamp - s.timestamp) <= 30
-      AND abs(json_extract(mp_json(t.metadata), '$.lines_added') * 40.0
-            - json_extract(mp_json(s.metadata), '$.text_length'))
-          < json_extract(mp_json(s.metadata), '$.text_length') * 0.2
-    """
-    return db.execute(sql, (sid,)).rowcount
+    """browser_copy → nearest file_edit with content length within 20%."""
+    rows = db.execute(
+        "SELECT id, type, timestamp, metadata FROM events "
+        "WHERE session_id = ? AND type IN ('browser_copy', 'file_edit') "
+        "ORDER BY timestamp", (sid,),
+    ).fetchall()
+    claimed: set[str] = set()
+    pairs: list[tuple[str, str]] = []
+    for src in rows:
+        if src["type"] != "browser_copy":
+            continue
+        src_len = _decompress_meta(src["metadata"]).get("text_length", 0)
+        if not src_len:
+            continue
+        for tgt in rows:
+            if tgt["type"] != "file_edit" or tgt["id"] in claimed or tgt["timestamp"] <= src["timestamp"]:
+                continue
+            if abs(_decompress_meta(tgt["metadata"]).get("lines_added", 0) * 40 - src_len) < src_len * 0.2:
+                pairs.append((src["id"], tgt["id"]))
+                claimed.add(tgt["id"])
+                break
+    if pairs:
+        db.executemany(
+            "INSERT OR IGNORE INTO causal_links (source_id, target_id, type, confidence) "
+            "VALUES (?, ?, 'PASTED_FROM', 0.7)", pairs)
+    return len(pairs)
 
 
 def _link_action_resources(db: object, sid: str) -> None:
