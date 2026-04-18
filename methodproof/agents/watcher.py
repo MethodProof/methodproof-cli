@@ -45,9 +45,6 @@ IGNORE_PATTERNS = re.compile(
 )
 
 
-_MAX_DIFF_BYTES = 50_000
-_MAX_HUNK_LINES = 2_000
-
 _HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 _DIFF_FILE_RE = re.compile(r"^diff --git a/(.+?) b/(.+?)$")
 
@@ -60,7 +57,6 @@ def _parse_hunks(diff_text: str, include_lines: bool) -> list[dict[str, object]]
     """
     hunks: list[dict[str, object]] = []
     current: dict[str, object] | None = None
-    total_lines = 0
     for line in diff_text.splitlines():
         header = _HUNK_HEADER_RE.match(line)
         if header:
@@ -81,10 +77,7 @@ def _parse_hunks(diff_text: str, include_lines: bool) -> list[dict[str, object]]
             continue
         if line.startswith("+++") or line.startswith("---"):
             continue
-        if total_lines >= _MAX_HUNK_LINES:
-            continue
         current["lines"].append(line)  # type: ignore[union-attr]
-        total_lines += 1
     if current is not None:
         hunks.append(current)
     return hunks
@@ -122,7 +115,7 @@ def _git_diff_hunks(repo: str, path: str, include_lines: bool) -> list[dict[str,
             ["git", "-C", repo, "diff", "--unified=0", "--", path],
             capture_output=True, text=True, timeout=5,
         )
-        return _parse_hunks(result.stdout[:_MAX_DIFF_BYTES], include_lines)
+        return _parse_hunks(result.stdout, include_lines)
     except Exception:
         return []
 
@@ -136,7 +129,7 @@ def _git_show_file_hunks(
             ["git", "-C", repo, "show", "--format=", "--unified=0", sha],
             capture_output=True, text=True, timeout=10,
         )
-        return _parse_show_hunks(result.stdout[:_MAX_DIFF_BYTES * 4], include_lines)
+        return _parse_show_hunks(result.stdout, include_lines)
     except Exception:
         return {}
 
@@ -160,25 +153,25 @@ def _git_diff_stats(repo: str, path: str) -> tuple[int, int]:
 
 
 def _git_diff_content(repo: str, path: str) -> str:
-    """Get full diff content for a file, capped at 50KB."""
+    """Get full diff content for a file."""
     try:
         result = subprocess.run(
             ["git", "-C", repo, "diff", "--", path],
             capture_output=True, text=True, timeout=5,
         )
-        return result.stdout[:_MAX_DIFF_BYTES]
+        return result.stdout
     except Exception:
         return ""
 
 
 def _git_show_diff(repo: str, sha: str) -> str:
-    """Get full diff for a commit, capped at 50KB."""
+    """Get full diff for a commit."""
     try:
         result = subprocess.run(
             ["git", "-C", repo, "show", "--format=", sha],
             capture_output=True, text=True, timeout=10,
         )
-        return result.stdout[:_MAX_DIFF_BYTES]
+        return result.stdout
     except Exception:
         return ""
 
@@ -239,14 +232,44 @@ class _Handler(FileSystemEventHandler):
         lang = Path(event.src_path).suffix.lstrip(".")
         base.emit("file_delete", {"path": path, "language": lang})
 
+    def on_moved(self, event: FileSystemEvent) -> None:
+        if event.is_directory:
+            return
+        src = event.src_path
+        dest = getattr(event, "dest_path", "")
+        if IGNORE_PATTERNS.search(src) and IGNORE_PATTERNS.search(dest or src):
+            return
+        old_path = self._relpath(src)
+        new_path = self._relpath(dest) if dest else old_path
+        lang = Path(dest or src).suffix.lstrip(".")
+        old_hash = self._hashes.pop(old_path, None)
+        if old_hash:
+            self._hashes[new_path] = old_hash
+        base.emit("file_rename", {
+            "old_path": old_path, "new_path": new_path, "language": lang,
+        })
+
+
+def _read_branch(head_file: Path) -> str:
+    """Read current branch from .git/HEAD. Returns '' for detached HEAD."""
+    try:
+        content = head_file.read_text().strip()
+        if content.startswith("ref: refs/heads/"):
+            return content[16:]
+        return ""
+    except OSError:
+        return ""
+
 
 def _poll_git(watch_dir: str, stop: threading.Event) -> None:
-    """Poll .git/refs for new commits every 2 seconds."""
+    """Poll .git/refs for new commits and HEAD for branch switches."""
     git_dir = Path(watch_dir) / ".git"
     if not git_dir.exists():
         return
     seen: set[str] = set()
     refs = git_dir / "refs" / "heads"
+    head_file = git_dir / "HEAD"
+    last_branch = _read_branch(head_file)
     while not stop.is_set():
         try:
             for ref in refs.iterdir():
@@ -257,12 +280,17 @@ def _poll_git(watch_dir: str, stop: threading.Event) -> None:
                         _log_commit(watch_dir, sha)
         except OSError:
             pass
+        current_branch = _read_branch(head_file)
+        if current_branch and current_branch != last_branch and last_branch:
+            base.emit("git_branch_switch", {
+                "old_branch": last_branch, "new_branch": current_branch,
+            })
+        last_branch = current_branch
         stop.wait(2)
 
 
 def _log_commit(watch_dir: str, sha: str) -> None:
     try:
-        # Single git call: subject\x00author\x00email\x00iso_date\x00parent_hash\x00full_body
         fmt = subprocess.run(
             ["git", "-C", watch_dir, "log", "-1",
              "--format=%s%x00%an%x00%ae%x00%ai%x00%P%x00%B", sha],
@@ -275,12 +303,22 @@ def _log_commit(watch_dir: str, sha: str) -> None:
         committed_at = parts[3].strip() if len(parts) > 3 else ""
         parent_hash = parts[4].strip()[:7] if len(parts) > 4 else ""
         body = parts[5].strip() if len(parts) > 5 else ""
-        files = subprocess.run(
-            ["git", "-C", watch_dir, "diff-tree", "--no-commit-id", "-r", "--name-only", sha],
+        status_lines = subprocess.run(
+            ["git", "-C", watch_dir, "diff-tree", "--no-commit-id", "-r", "--name-status", sha],
             capture_output=True, text=True, timeout=5,
         ).stdout.strip().splitlines()
+        files: list[str] = []
+        file_statuses: dict[str, str] = {}
+        for sl in status_lines:
+            sl_parts = sl.split("\t", 1)
+            if len(sl_parts) == 2:
+                file_statuses[sl_parts[1]] = sl_parts[0]
+                files.append(sl_parts[1])
+            elif sl.strip():
+                files.append(sl.strip())
     except Exception:
-        subject, author, author_email, committed_at, parent_hash, body, files = "", "", "", "", "", "", []
+        subject, author, author_email, committed_at, parent_hash, body = "", "", "", "", "", ""
+        files, file_statuses = [], {}
     meta: dict[str, object] = {
         "hash": sha[:7], "message": subject, "files_changed": files,
         "author": author, "author_email": author_email, "committed_at": committed_at,
@@ -288,7 +326,12 @@ def _log_commit(watch_dir: str, sha: str) -> None:
     if parent_hash:
         meta["parent_hash"] = parent_hash
     if body and body != subject:
-        meta["body"] = body[:2000]
+        meta["body"] = body
+    if file_statuses:
+        meta["file_statuses"] = file_statuses
+    branch = _read_branch(Path(watch_dir) / ".git" / "HEAD")
+    if branch:
+        meta["branch"] = branch
     include_lines = base.is_content_captured()
     file_hunks = _git_show_file_hunks(watch_dir, sha, include_lines)
     if file_hunks:

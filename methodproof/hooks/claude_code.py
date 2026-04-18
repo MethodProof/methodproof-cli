@@ -113,20 +113,19 @@ _META_EXTRACTORS = {
         "tool": _TOOL, "tool_name": d.get("tool_name", "unknown"),
         "success": False, "is_interrupt": d.get("is_interrupt", False),
         "tool_input": d.get("tool_input") or {},
-        "error": str(d.get("error", ""))[:200],
+        "error": d.get("error", ""),
     },
     "SubagentStart": lambda d: {"tool": _TOOL, "agent_type": d.get("agent_type", "unknown"), "agent_id": d.get("agent_id", "")},
     "SubagentStop": lambda d: {
         "tool": _TOOL, "agent_type": d.get("agent_type", "unknown"), "agent_id": d.get("agent_id", ""),
         "last_assistant_message": d.get("last_assistant_message", ""),
-        "last_message_preview": str(d.get("last_assistant_message", ""))[:200],
     },
     "TaskCreated": lambda d: {"tool": _TOOL, "task_id": d.get("task_id", ""), "subject": d.get("task_subject", "")},
     "TaskCompleted": lambda d: {"tool": _TOOL, "task_id": d.get("task_id", "")},
     "SessionStart": lambda d: {"tool": _TOOL, "session_id": d.get("session_id", ""), "cwd": d.get("cwd", "")},
     "SessionEnd": lambda d: {"tool": _TOOL, "session_id": d.get("session_id", "")},
     "Stop": lambda d: {"tool": _TOOL},
-    "StopFailure": lambda d: {"tool": _TOOL, "error": str(d.get("error", ""))[:200]},
+    "StopFailure": lambda d: {"tool": _TOOL, "error": d.get("error", "")},
     "CwdChanged": lambda d: {
         "tool": _TOOL, "cwd": d.get("cwd", ""),
         # NOTE: fires for both human `cd` and Claude tool use — caller is ambiguous

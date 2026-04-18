@@ -68,6 +68,24 @@ _EVENT_GATES: dict[str, str] = {
     "gemini_session_end": "ai_responses",
     "kiro_session_start": "ai_prompts",
     "kiro_session_end": "ai_responses",
+    # Hook lifecycle events (continued)
+    "claude_session_end": "ai_responses",
+    "agent_turn_end": "ai_responses",
+    "agent_turn_error": "ai_responses",
+    "context_compact_start": "ai_responses",
+    "context_compact_end": "ai_responses",
+    "permission_request": "ai_responses",
+    "permission_denied": "ai_responses",
+    "mcp_elicitation": "ai_responses",
+    "mcp_elicitation_result": "ai_responses",
+    "worktree_create": "ai_responses",
+    "worktree_remove": "ai_responses",
+    "cwd_changed": "ai_responses",
+    "tool_failure": "ai_responses",
+    # File system events
+    "file_rename": "file_changes",
+    # Git events
+    "git_branch_switch": "git_commits",
 }
 
 # Maps capture categories to (event_type, field) pairs for field-level gating.
@@ -140,6 +158,13 @@ def is_content_captured() -> bool:
     to decide whether to include line-level diff content alongside structural
     metadata."""
     return bool(_capture.get("code_capture", False))
+
+
+def is_journal_mode() -> bool:
+    """True when journal_mode is enabled — full content capture (prompts,
+    completions, diffs, terminal output). Agents use this to decide whether
+    to include content fields that are stripped in structural-only mode."""
+    return _journal_mode
 
 
 def emit(event_type: str, metadata: dict[str, Any]) -> None:
@@ -226,6 +251,10 @@ def _stream_event(entry: dict[str, Any]) -> None:
         detail = f'{meta.get("path", "?")} ({meta.get("size", 0)}B)'
     elif etype == "file_delete":
         detail = meta.get("path", "?")
+    elif etype == "file_rename":
+        detail = f'{meta.get("old_path", "?")} → {meta.get("new_path", "?")}'
+    elif etype == "git_branch_switch":
+        detail = f'{meta.get("old_branch", "?")} → {meta.get("new_branch", "?")}'
     elif etype == "terminal_cmd":
         detail = f'{meta.get("command", "?")[:60]} → exit {meta.get("exit_code", "?")}'
     elif etype == "test_run":
