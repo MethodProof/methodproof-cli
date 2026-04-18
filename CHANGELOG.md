@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.8.1] — 2026-04-17
+
+### Added
+- **File rename detection** — watcher `on_moved` handler emits `file_rename` atoms with `old_path`/`new_path` instead of producing two incorrect atoms (delete + create).
+- **`git_branch_switch` event** — git poller reads `.git/HEAD` on each 2s cycle and emits `git_branch_switch` with `old_branch`/`new_branch` when the active branch changes.
+- **`git_commit` branch name** — commits now carry a `branch` field read from `.git/HEAD`.
+- **`git_commit` per-file change status** — `files_changed` is now accompanied by `file_statuses` (`{path: "A"|"M"|"D"|"R"}`) via `--name-status` instead of `--name-only`.
+- **11 new test frameworks** — detection and result parsing for vitest, mocha, rspec, minitest, phpunit, unittest, dotnet test, swift test, gradle test, maven test, and ExUnit (total: 15).
+- **`test_run` carries `cwd`** — forwarded from the shell hook JSONL instead of being discarded.
+- **`is_journal_mode()` public API** — exposed on `agents.base` for agents making structural-vs-full content capture decisions.
+
+### Fixed
+- **15 hook event types bypassed consent gates** — `claude_session_end`, `agent_turn_end`, `agent_turn_error`, `context_compact_start/end`, `permission_request/denied`, `mcp_elicitation/result`, `worktree_create/remove`, `cwd_changed`, `tool_failure`, plus new `file_rename` and `git_branch_switch` — all now properly gated in `_EVENT_GATES`.
+- **Removed all arbitrary data truncation** — no more 50KB diff cap, 2000-line hunk cap, 2000-char commit body cap, 500-char terminal output cap, or 200-char error cap. The CLI captures faithfully; downstream consumers decide what to do with large payloads. Preview fields (derived summaries alongside raw data) are unchanged.
+
+### Changed
+- **TUI inline detail screen** — `mp log` enter key opens a full-screen `DetailScreen` with event mix breakdown and per-type timeline instead of exiting to an external viewer.
+- **SHOMEN/KINMYAKU theme toggle** — `MP_THEME=shomen` selects the light theme; default remains `kinmyaku` (dark). `Theme` dataclass adds `accent`, `cursor_bg`, `cursor_fg` semantic roles. DataTable cursor CSS for both themes.
+
 ## [0.8.0] — 2026-04-15
 
 ### Added
