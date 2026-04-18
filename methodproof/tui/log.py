@@ -1,25 +1,28 @@
-"""Textual TUI for mp log — session browser with preview pane."""
+"""Textual TUI for mp log — session browser with inline detail screen."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, UTC
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static
 
 from methodproof import store
-from methodproof.tui.theme import BASE_CSS, BORDER, DIM, GOLD, GREEN, PURPLE, RED, TEXT
+from methodproof.tui.theme import ACTIVE, BASE_CSS, BORDER, DIM, GOLD, GREEN, PURPLE, RED, TEXT
+from methodproof.viewer import SENSITIVE_FIELDS, _event_summary, _offset
 
 _CSS = BASE_CSS + f"""
 #sessions-table {{
     width: 3fr;
-    border-right: solid {BORDER};
+    border-right: solid {ACTIVE.border};
 }}
 #preview-pane {{
     width: 1fr;
     padding: 1 2;
-    background: #0a0908;
+    background: {ACTIVE.sidebar_bg};
 }}
 .preview-meta {{
     color: {TEXT};
@@ -33,6 +36,12 @@ _CSS = BASE_CSS + f"""
     color: {GOLD};
     text-style: bold;
     margin: 1 0 0 0;
+}}
+#detail-scroll {{
+    padding: 1 3;
+}}
+#detail-content {{
+    width: 100%;
 }}
 """
 
@@ -48,8 +57,89 @@ def _fmt_events(n: int) -> str:
     return f"{n/1000:.1f}k" if n >= 1000 else str(n)
 
 
+class DetailScreen(Screen):
+    """Full-screen session detail view — esc returns to the list."""
+
+    BINDINGS = [
+        Binding("escape", "back", "back"),
+        Binding("q", "back", "back"),
+    ]
+
+    def __init__(self, session: dict) -> None:
+        super().__init__()
+        self._session = session
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=False)
+        with VerticalScroll(id="detail-scroll"):
+            yield Static(self._render(), id="detail-content")
+        yield Footer()
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+    def _render(self) -> str:
+        sess = self._session
+        sid = (sess.get("id") or "")[:8]
+        created = sess.get("created_at", 0)
+        completed = sess.get("completed_at")
+        dt_str = datetime.fromtimestamp(created, tz=UTC).strftime(_DT_FMT) if created else "—"
+        dur = _fmt_dur(int((completed or created) - created)) if completed else "in progress"
+        vis = sess.get("visibility", "private")
+        synced = "synced" if sess.get("synced") else "local"
+        tags = json.loads(sess.get("tags") or "[]")
+        repo = sess.get("repo_url") or "—"
+
+        events = store.get_events(sess["id"], decrypt=True)
+
+        lines = [
+            f"[bold {GOLD}]session {sid}[/bold {GOLD}]",
+            f"[{DIM}]{dt_str}  ·  {dur}  ·  {len(events)} events  ·  {vis}  ·  {synced}[/{DIM}]",
+            f"[{DIM}]repo: {repo}[/{DIM}]",
+        ]
+        if tags:
+            lines.append(f"[{DIM}]tags: {', '.join(tags)}[/{DIM}]")
+
+        if not events:
+            lines.append("")
+            lines.append(f"[{DIM}]no events captured[/{DIM}]")
+            return "\n".join(lines)
+
+        by_type: dict[str, list[dict]] = {}
+        for e in events:
+            by_type.setdefault(e["type"], []).append(e)
+
+        total = len(events)
+        lines.append("")
+        lines.append(f"[bold {GOLD}]Event mix[/bold {GOLD}]")
+        for etype, items in sorted(by_type.items(), key=lambda x: -len(x[1])):
+            pct = len(items) / total
+            bar_len = max(1, int(pct * 18))
+            bar = "█" * bar_len + "░" * (18 - bar_len)
+            lines.append(
+                f"[{DIM}]{etype:<20}[/{DIM}] "
+                f"[{TEXT}]{len(items):>5}[/{TEXT}]  "
+                f"[{GREEN}]{bar}[/{GREEN}] "
+                f"[{DIM}]{int(pct * 100):>3}%[/{DIM}]"
+            )
+
+        start_ts = events[0]["timestamp"]
+        lines.append("")
+        lines.append(f"[bold {GOLD}]Timeline[/bold {GOLD}]")
+        for etype, items in sorted(by_type.items(), key=lambda x: -len(x[1])):
+            lines.append("")
+            lines.append(f"[{PURPLE}]{etype}[/{PURPLE}] [{DIM}]({len(items)})[/{DIM}]")
+            for e in items:
+                ts = _offset(e["timestamp"], start_ts)
+                meta = json.loads(e.get("metadata") or "{}")
+                summary = _event_summary(etype, meta) or ""
+                lines.append(f"  [{DIM}]{ts}[/{DIM}]  [{TEXT}]{summary}[/{TEXT}]")
+
+        return "\n".join(lines)
+
+
 class LogApp(App[None]):
-    """Session browser — navigate with ↑↓, push with p, view with enter."""
+    """Session browser — ↑↓ navigate, enter details, esc back/quit, p push."""
 
     TITLE = "methodproof — mp log"
     CSS = _CSS
@@ -95,6 +185,7 @@ class LogApp(App[None]):
 
         if self._sessions:
             self._update_preview(0)
+        table.focus()
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         self._update_preview(event.cursor_row)
@@ -119,6 +210,8 @@ class LogApp(App[None]):
             f"[{DIM}]{dur}  ·  {ev} events[/{DIM}]",
             f"[{DIM}]{sid}[/{DIM}]",
             "",
+            f"[{DIM}]enter: details  ·  p: push  ·  esc: quit[/{DIM}]",
+            "",
         ]
 
         if moments:
@@ -138,16 +231,17 @@ class LogApp(App[None]):
     def action_push_session(self) -> None:
         table = self.query_one(DataTable)
         row = table.cursor_row
-        if row < len(self._sessions):
-            sid = self._sessions[row].get("id", "")
-            self.exit(("push", sid))
+        if row is None or row >= len(self._sessions):
+            return
+        sid = self._sessions[row].get("id", "")
+        self.exit(("push", sid))
 
     def action_view_session(self) -> None:
         table = self.query_one(DataTable)
         row = table.cursor_row
-        if row < len(self._sessions):
-            sid = self._sessions[row].get("id", "")
-            self.exit(("view", sid))
+        if row is None or row >= len(self._sessions):
+            return
+        self.push_screen(DetailScreen(self._sessions[row]))
 
 
 def run() -> tuple[str, str] | None:

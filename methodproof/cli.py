@@ -1577,8 +1577,6 @@ def cmd_log(args: argparse.Namespace) -> None:
             fake = _ap.Namespace(session_id=sid, local=False)
             if action == "push":
                 cmd_push(fake)
-            elif action == "view":
-                cmd_view(fake)
         return
     sessions = store.list_sessions()
     if not sessions:
