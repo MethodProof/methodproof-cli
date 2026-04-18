@@ -76,6 +76,8 @@ _TYPE_MAP = {
     # Worktree
     "WorktreeCreate": "worktree_create",
     "WorktreeRemove": "worktree_remove",
+    # Notifications
+    "Notification": "notification",
 }
 
 _TOOL = "claude_code"
@@ -139,6 +141,12 @@ _META_EXTRACTORS = {
     "ElicitationResult": lambda d: {"tool": _TOOL},
     "WorktreeCreate": lambda d: {"tool": _TOOL, "worktree_path": d.get("worktree_path", "")},
     "WorktreeRemove": lambda d: {"tool": _TOOL, "worktree_path": d.get("worktree_path", "")},
+    "Notification": lambda d: {
+        "tool": _TOOL,
+        "title": d.get("title", ""),
+        "message": d.get("message", d.get("text", ""))[:1000],
+        "notification_type": d.get("type", d.get("notification_type", "")),
+    },
 }
 
 

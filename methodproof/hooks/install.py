@@ -38,6 +38,7 @@ HOOK_EVENTS = [
     "ElicitationResult",         # user responded to MCP
     "WorktreeCreate",            # git worktree created (parallel agent)
     "WorktreeRemove",            # git worktree removed
+    "Notification",              # system notifications (recap, compaction summary, etc.)
 ]
 
 # --- Codex CLI ---

@@ -162,6 +162,10 @@ if command -v jq >/dev/null 2>&1; then
       TYPE=$(echo "$EVENT" | sed 's/Elicitation$/mcp_elicitation/;s/ElicitationResult/mcp_elicitation_result/')
       META='{"tool":"claude_code"}'
       ;;
+    Notification)
+      TYPE="notification"
+      META=$(echo "$INPUT" | jq -c '{tool: "claude_code", title: (.title // ""), message: ((.message // .text // "")[:1000]), notification_type: (.type // .notification_type // "")}' 2>/dev/null || echo '{"tool":"claude_code"}')
+      ;;
     *)
       TYPE="claude_code_event"
       META="{\"event\":\"$EVENT\"}"
