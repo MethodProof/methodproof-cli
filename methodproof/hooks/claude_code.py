@@ -150,6 +150,24 @@ _META_EXTRACTORS = {
 }
 
 
+def _extract_recap(transcript_path: str) -> str | None:
+    """Grep transcript for the last ※ recap: line. Journal mode only."""
+    import pathlib
+    tp = pathlib.Path(transcript_path)
+    if not tp.exists():
+        return None
+    try:
+        text = tp.read_text(errors="replace")
+    except OSError:
+        return None
+    last_recap = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("※ recap:") or stripped.startswith("recap:"):
+            last_recap = stripped.removeprefix("※ ").removeprefix("recap:").strip()
+    return last_recap
+
+
 def main() -> None:
     try:
         data = json.load(sys.stdin)
@@ -162,7 +180,20 @@ def main() -> None:
     meta = extractor(data) if extractor else {"tool": _TOOL, "event": event}
     ts = time.time()
 
-    payload = json.dumps({"events": [{"type": etype, "timestamp": ts, "metadata": meta}]}).encode()
+    events_out = [{"type": etype, "timestamp": ts, "metadata": meta}]
+
+    # On Stop, grep transcript for recap (journal mode only)
+    transcript_path = data.get("transcript_path", "")
+    if event == "Stop" and transcript_path:
+        recap = _extract_recap(transcript_path)
+        if recap:
+            events_out.append({
+                "type": "context_recap",
+                "timestamp": ts,
+                "metadata": {"tool": _TOOL, "recap": recap[:2000]},
+            })
+
+    payload = json.dumps({"events": events_out}).encode()
     req = urllib.request.Request(
         "http://localhost:9877/events", data=payload,
         headers={"Content-Type": "application/json"}, method="POST",

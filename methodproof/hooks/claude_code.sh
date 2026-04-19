@@ -125,6 +125,15 @@ if command -v jq >/dev/null 2>&1; then
     Stop)
       TYPE="agent_turn_end"
       META='{"tool":"claude_code"}'
+      # Extract recap from transcript if available (journal mode)
+      TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
+      if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+        RECAP=$(grep -E '※ recap:|^recap:' "$TRANSCRIPT" | tail -1 | sed 's/^.*※ recap: *//;s/^recap: *//' | head -c 2000)
+        if [ -n "$RECAP" ]; then
+          RECAP_ESCAPED=$(echo "$RECAP" | jq -Rs '.' 2>/dev/null || echo '""')
+          RECAP_EVENT=",{\"type\":\"context_recap\",\"timestamp\":$TS,\"metadata\":{\"tool\":\"claude_code\",\"recap\":$RECAP_ESCAPED}}"
+        fi
+      fi
       ;;
     StopFailure)
       TYPE="agent_turn_error"
@@ -178,7 +187,7 @@ else
 fi
 
 # Post to bridge with strict 1-second timeout (never block Claude Code)
-PAYLOAD="{\"events\":[{\"type\":\"$TYPE\",\"timestamp\":$TS,\"metadata\":$META}]}"
+PAYLOAD="{\"events\":[{\"type\":\"$TYPE\",\"timestamp\":$TS,\"metadata\":$META}${RECAP_EVENT:-}]}"
 RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 1 --connect-timeout 0.5 \
   -X POST http://localhost:9877/events \
   -H "Content-Type: application/json" \
