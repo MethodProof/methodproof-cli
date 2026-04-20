@@ -40,8 +40,15 @@ IGNORE_PATTERNS = re.compile(
     r"|\.build/|DerivedData/|Pods/"
     # Build output / artifacts
     r"|dist/|build/|\.output/"
-    # Logs and locks
-    r"|\.lock$|\.log$)"
+    # Logs and locks — runtime log output, never engineering source.
+    # ``/logs/`` excludes any file under a ``logs/`` directory regardless
+    # of extension. The prior ``\.log$`` check was too narrow — session
+    # 8c21 had 15,269 file_edit events captured on
+    # ``methodproof-platform/logs/methodproof-platform.jsonl`` (the
+    # platform's own runtime log, NOT ``.log`` extension) which polluted
+    # both the thread and step distributions. Any project with a
+    # ``logs/`` subdirectory for runtime output inherits the exclusion.
+    r"|/logs/|\.lock$|\.log$)"
 )
 
 
