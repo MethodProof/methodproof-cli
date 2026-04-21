@@ -8,6 +8,39 @@
 
 INPUT=$(cat)
 
+# Model cache: per-Claude-session model attribution.
+# The transcript JSONL is the only place Claude Code surfaces the active
+# model. Re-reading it on every PreToolUse is too expensive, so we refresh
+# a cache at the cheap once-per-turn waypoints (SessionStart / Stop — and
+# UserPromptSubmit which delegates to the Python hook that updates it too)
+# and read it via a cheap jq lookup on tool events.
+_MP_MODEL_CACHE="${HOME}/.methodproof/hook_state/models.json"
+
+# Read the current model for a session. Fast path — no Python subprocess.
+_mp_read_model() {
+  local sess="$1"
+  [ -z "$sess" ] || [ ! -f "$_MP_MODEL_CACHE" ] && return
+  command -v jq >/dev/null 2>&1 || return
+  jq -r --arg s "$sess" '.[$s].model // empty' "$_MP_MODEL_CACHE" 2>/dev/null
+}
+
+# Refresh the cache by shelling out to the Python module (handles JSON
+# safely + atomic write). Rare — called on SessionStart / Stop only.
+_mp_update_model() {
+  local sess="$1" transcript="$2"
+  [ -z "$sess" ] || [ -z "$transcript" ] && return
+  command -v python3 >/dev/null 2>&1 || return
+  python3 -m methodproof.hooks.model_cache update "$sess" "$transcript" \
+    >/dev/null 2>&1 || true
+}
+
+_mp_clear_model() {
+  local sess="$1"
+  [ -z "$sess" ] && return
+  command -v python3 >/dev/null 2>&1 || return
+  python3 -m methodproof.hooks.model_cache clear "$sess" >/dev/null 2>&1 || true
+}
+
 if command -v jq >/dev/null 2>&1; then
   EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // "unknown"' 2>/dev/null || echo "unknown")
 else
@@ -25,6 +58,24 @@ fi
 
 # Build event JSON — use jq if available, else minimal Python
 if command -v jq >/dev/null 2>&1; then
+  # Pull session + transcript once — cache ops + model attribution use both.
+  SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""' 2>/dev/null)
+  TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // ""' 2>/dev/null)
+
+  # Refresh model cache at once-per-turn waypoints. Cheap tool events
+  # (PreToolUse / PostToolUse) read the cache without touching the
+  # transcript.
+  case "$EVENT" in
+    SessionStart|Stop)
+      _mp_update_model "$SESSION_ID" "$TRANSCRIPT"
+      ;;
+    SessionEnd)
+      _mp_clear_model "$SESSION_ID"
+      ;;
+  esac
+
+  MP_MODEL=$(_mp_read_model "$SESSION_ID")
+
   case "$EVENT" in
     UserPromptSubmit)
       # Delegate to Python for structural analysis (shell can't do regex classification)
@@ -37,9 +88,10 @@ if command -v jq >/dev/null 2>&1; then
       ;;
     PreToolUse)
       TYPE="tool_call"
-      META=$(echo "$INPUT" | jq -c '{
+      META=$(echo "$INPUT" | jq -c --arg model "$MP_MODEL" '{
         tool: (.tool_name // "unknown"),
         tool_use_id: (.tool_use_id // ""),
+        model: (if $model == "" then null else $model end),
         tool_input: (.tool_input // {}),
         tool_input_preview: (
           (.tool_input // {}) as $ti |
@@ -58,10 +110,11 @@ if command -v jq >/dev/null 2>&1; then
       ;;
     PostToolUse)
       TYPE="tool_result"
-      META=$(echo "$INPUT" | jq -c '{
+      META=$(echo "$INPUT" | jq -c --arg model "$MP_MODEL" '{
         tool: (.tool_name // "unknown"),
         tool_use_id: (.tool_use_id // ""),
         success: true,
+        model: (if $model == "" then null else $model end),
         tool_input: (.tool_input // {}),
         tool_response: (.tool_response // {}),
         tool_input_preview: (
@@ -112,7 +165,11 @@ if command -v jq >/dev/null 2>&1; then
       ;;
     SessionStart)
       TYPE="claude_session_start"
-      META=$(echo "$INPUT" | jq -c '{claude_session_id: (.session_id // ""), cwd: (.cwd // "")}' 2>/dev/null || echo '{}')
+      META=$(echo "$INPUT" | jq -c --arg model "$MP_MODEL" '{
+        claude_session_id: (.session_id // ""),
+        cwd: (.cwd // ""),
+        model: (if $model == "" then null else $model end)
+      }' 2>/dev/null || echo '{}')
       ;;
     PostToolUseFailure)
       TYPE="tool_failure"
@@ -124,7 +181,11 @@ if command -v jq >/dev/null 2>&1; then
       ;;
     Stop)
       TYPE="agent_turn_end"
-      META='{"tool":"claude_code"}'
+      if [ -n "$MP_MODEL" ]; then
+        META="{\"tool\":\"claude_code\",\"model\":\"$MP_MODEL\"}"
+      else
+        META='{"tool":"claude_code"}'
+      fi
       # Extract recap from transcript if available (journal mode)
       TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
       if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then

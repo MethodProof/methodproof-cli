@@ -16,6 +16,22 @@ except ImportError:
     analyze_prompt = lambda _: {}
     compose_summary = lambda _: ""
 
+try:
+    from methodproof.hooks import model_cache
+except ImportError:
+    model_cache = None  # type: ignore[assignment]
+
+
+def _current_model(session_id: str) -> str | None:
+    """Return the most recently-seen model for this Claude session, from
+    the per-session cache. None if cache unavailable or no prior update."""
+    if model_cache is None or not session_id:
+        return None
+    try:
+        return model_cache.get_model(session_id)
+    except Exception:
+        return None
+
 def _extract_result_text(response) -> str:
     """Extract plain text from tool_response regardless of shape.
 
@@ -92,25 +108,34 @@ def _tool_input_preview(d: dict) -> str:
     return json.dumps(inp)[:300] if inp else ""
 
 
+def _with_model(meta: dict, d: dict) -> dict:
+    """Attach the session's currently-cached model to a metadata dict.
+    No-op when session_id is missing or cache has no entry."""
+    model = _current_model(d.get("session_id") or "")
+    if model:
+        meta["model"] = model
+    return meta
+
+
 _META_EXTRACTORS = {
-    "UserPromptSubmit": lambda d: {
+    "UserPromptSubmit": lambda d: _with_model({
         "tool": _TOOL,
         "prompt_text": d.get("prompt") or "",
         "prompt_preview": _build_prompt_meta(d.get("prompt") or "").get("prompt_summary", ""),
         "prompt_length": len(d.get("prompt") or ""),
-    },
-    "PreToolUse": lambda d: {
+    }, d),
+    "PreToolUse": lambda d: _with_model({
         "tool": _TOOL, "tool_name": d.get("tool_name", "unknown"),
         "tool_input": d.get("tool_input") or {},
         "tool_input_preview": _tool_input_preview(d),
-    },
-    "PostToolUse": lambda d: {
+    }, d),
+    "PostToolUse": lambda d: _with_model({
         "tool": _TOOL, "tool_name": d.get("tool_name", "unknown"), "success": True,
         "tool_input": d.get("tool_input") or {},
         "tool_response": d.get("tool_response") or {},
         "tool_input_preview": _tool_input_preview(d),
         "result_preview": _extract_result_text(d.get("tool_response")),
-    },
+    }, d),
     "PostToolUseFailure": lambda d: {
         "tool": _TOOL, "tool_name": d.get("tool_name", "unknown"),
         "success": False, "is_interrupt": d.get("is_interrupt", False),
@@ -124,9 +149,9 @@ _META_EXTRACTORS = {
     },
     "TaskCreated": lambda d: {"tool": _TOOL, "task_id": d.get("task_id", ""), "subject": d.get("task_subject", "")},
     "TaskCompleted": lambda d: {"tool": _TOOL, "task_id": d.get("task_id", "")},
-    "SessionStart": lambda d: {"tool": _TOOL, "session_id": d.get("session_id", ""), "cwd": d.get("cwd", "")},
+    "SessionStart": lambda d: _with_model({"tool": _TOOL, "session_id": d.get("session_id", ""), "cwd": d.get("cwd", "")}, d),
     "SessionEnd": lambda d: {"tool": _TOOL, "session_id": d.get("session_id", "")},
-    "Stop": lambda d: {"tool": _TOOL},
+    "Stop": lambda d: _with_model({"tool": _TOOL}, d),
     "StopFailure": lambda d: {"tool": _TOOL, "error": d.get("error", "")},
     "CwdChanged": lambda d: {
         "tool": _TOOL, "cwd": d.get("cwd", ""),
@@ -175,6 +200,21 @@ def main() -> None:
         return
 
     event = data.get("hook_event_name", "unknown")
+    session_id = data.get("session_id") or ""
+    transcript_path = data.get("transcript_path", "")
+
+    # Refresh the per-session model cache at the cheap waypoints. We do this
+    # BEFORE running the metadata extractor so the extractor's _with_model
+    # call sees the freshest value. Once-per-turn events only — we never
+    # re-read the transcript on PreToolUse / PostToolUse (hot path).
+    if model_cache is not None and transcript_path and session_id and event in (
+        "UserPromptSubmit", "SessionStart", "Stop",
+    ):
+        try:
+            model_cache.update_from_transcript(session_id, transcript_path)
+        except Exception:
+            pass  # Cache is best-effort; hook must never raise.
+
     etype = _TYPE_MAP.get(event, "claude_code_event")
     extractor = _META_EXTRACTORS.get(event)
     meta = extractor(data) if extractor else {"tool": _TOOL, "event": event}
@@ -183,7 +223,6 @@ def main() -> None:
     events_out = [{"type": etype, "timestamp": ts, "metadata": meta}]
 
     # On Stop, grep transcript for recap (journal mode only)
-    transcript_path = data.get("transcript_path", "")
     if event == "Stop" and transcript_path:
         recap = _extract_recap(transcript_path)
         if recap:
@@ -192,6 +231,13 @@ def main() -> None:
                 "timestamp": ts,
                 "metadata": {"tool": _TOOL, "recap": recap[:2000]},
             })
+
+    # Clean up the cache entry on session end so the file stays bounded.
+    if model_cache is not None and event == "SessionEnd" and session_id:
+        try:
+            model_cache.clear_session(session_id)
+        except Exception:
+            pass
 
     payload = json.dumps({"events": events_out}).encode()
     req = urllib.request.Request(
