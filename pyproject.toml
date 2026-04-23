@@ -1,17 +1,17 @@
 [project]
 name = "methodproof"
-version = "0.8.4"
+version = "0.8.5"
 description = "See how you code. Capture and visualize your engineering process."
-requires-python = ">=3.11"
-dependencies = ["watchdog>=4.0", "websocket-client>=1.7", "cryptography>=43.0", "keyring>=25.0", "textual>=0.59", "rich>=13.7", "sqlcipher3>=0.6"]
+requires-python = ">=3.12"
+dependencies = ["watchdog>=4.0", "websocket-client>=1.7", "cryptography>=46.0.7", "keyring>=25.0", "textual>=0.59", "rich>=13.7", "sqlcipher3>=0.6"]
 license = "Apache-2.0"
 readme = "README.md"
 
 [project.optional-dependencies]
-proxy = ["mitmproxy>=10.0"]
+proxy = ["mitmproxy>=12.2.2"]
 
 [dependency-groups]
-dev = ["pytest>=8.0", "pytest-cov>=5.0"]
+dev = ["pytest>=9.0.3", "pytest-cov>=5.0"]
 
 [project.scripts]
 methodproof = "methodproof.cli:main"
