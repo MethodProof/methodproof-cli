@@ -203,12 +203,15 @@ def main() -> None:
     session_id = data.get("session_id") or ""
     transcript_path = data.get("transcript_path", "")
 
-    # Refresh the per-session model cache at the cheap waypoints. We do this
-    # BEFORE running the metadata extractor so the extractor's _with_model
-    # call sees the freshest value. Once-per-turn events only — we never
-    # re-read the transcript on PreToolUse / PostToolUse (hot path).
+    # Refresh the per-session model cache before running the metadata extractor
+    # so `_with_model` sees the freshest value. We include PreToolUse because
+    # the first turn's UserPromptSubmit fires before any assistant message is
+    # in the transcript — without a PreToolUse refresh, every tool event in
+    # that first turn lands with no `model` attribution. PostToolUse is left
+    # out: once PreToolUse has refreshed, the cache is warm for the rest of
+    # the turn, and PostToolUse would duplicate the transcript read.
     if model_cache is not None and transcript_path and session_id and event in (
-        "UserPromptSubmit", "SessionStart", "Stop",
+        "UserPromptSubmit", "SessionStart", "Stop", "PreToolUse",
     ):
         try:
             model_cache.update_from_transcript(session_id, transcript_path)

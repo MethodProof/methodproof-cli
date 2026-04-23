@@ -230,3 +230,49 @@ def test_claude_code_hook_omits_model_when_cache_empty(tmp_path: pathlib.Path) -
     }
     meta = hook._META_EXTRACTORS["PreToolUse"](payload)
     assert "model" not in meta
+
+
+def test_main_refreshes_cache_on_pretooluse_first_turn(
+    tmp_path: pathlib.Path, isolated_cache: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """First-turn PreToolUse arrives with a cold cache (UserPromptSubmit
+    ran before any assistant message hit the transcript). `main()` must
+    refresh the cache on PreToolUse so the emitted event carries `model`.
+    Without this, every tool event in the session's first turn lands
+    with no model attribution and downstream `model_switch` moments and
+    SENT_TO/CONSUMED edges silently fail."""
+    import io
+    from methodproof.hooks import claude_code as hook
+
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(transcript, [
+        {"type": "assistant", "model": "claude-sonnet-4-5"},
+    ])
+    assert model_cache.get_model("sess-first-turn") is None  # cold
+
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "session_id": "sess-first-turn",
+        "transcript_path": str(transcript),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "/abs/app.py"},
+    }
+    captured: dict = {}
+
+    def fake_urlopen(req, timeout):
+        captured["body"] = json.loads(req.data.decode())
+
+        class _R:
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+        return _R()
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    hook.main()
+
+    assert model_cache.get_model("sess-first-turn") == "claude-sonnet-4-5"
+    events = captured["body"]["events"]
+    assert events[0]["type"] == "tool_call"
+    assert events[0]["metadata"]["model"] == "claude-sonnet-4-5"
