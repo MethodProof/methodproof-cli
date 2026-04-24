@@ -9,6 +9,34 @@ from typing import Any
 from methodproof import store
 
 
+def _prepare_events_for_push(session_id: str) -> list[dict[str, Any]]:
+    """Return events for outbound sync. Sensitive fields encrypted with the
+    local master-derived db_key are decrypted here so the server receives
+    plaintext. Users who opt into true E2E (`mp e2e on`) keep ciphertext
+    verbatim — they explicitly chose platform-unreadable storage.
+
+    Local-DB at-rest encryption and E2E share the `e2e:v1:` wire format,
+    so without this step the server can't tell them apart and shows
+    ciphertext for normal (non-E2E) users."""
+    raw = store.get_events(session_id, decrypt=False)
+    from methodproof import config
+    cfg = config.load()
+    if cfg.get("e2e_mode"):
+        return raw
+    key = store._try_load_db_key()
+    if key is None:
+        return raw
+    from methodproof.crypto import decrypt_metadata_safe
+    prepared = []
+    for e in raw:
+        meta = json.loads(e["metadata"])
+        decrypt_metadata_safe(meta, key)
+        e2 = dict(e)
+        e2["metadata"] = json.dumps(meta)
+        prepared.append(e2)
+    return prepared
+
+
 def sync_metadata(session: dict[str, Any], token: str, api_url: str) -> None:
     """Sync repo, tags, and visibility for an already-pushed session."""
     remote_id = session.get("remote_id")
@@ -127,7 +155,7 @@ def push(session_id: str, token: str, api_url: str, force: bool = False) -> str:
     print(f"done ({remote_id[:8]})")
 
     # Upload events in batches (with hash chain if available)
-    events = store.get_events(session_id)
+    events = _prepare_events_for_push(session_id)
     event_hashes = store.get_event_hashes(session_id)
     hash_lookup = {h["event_id"]: h["hash"] for h in event_hashes}
     total = len(events)
@@ -212,6 +240,34 @@ def push(session_id: str, token: str, api_url: str, force: bool = False) -> str:
 def _iso(ts: float) -> str:
     from datetime import datetime, UTC
     return datetime.fromtimestamp(ts, tz=UTC).isoformat()
+
+
+def resync_events(session: dict[str, Any], token: str, api_url: str) -> int:
+    """Re-push events for an already-synced session so server metadata reflects
+    the current local state. Uses the dedicated `/events/resync` endpoint
+    (accepts completed sessions; updates existing Action nodes in place).
+    Returns the number of events submitted."""
+    remote_id = session.get("remote_id")
+    if not remote_id:
+        raise SystemExit(f"Session {session['id'][:8]} has no remote_id — push it first.")
+    events = _prepare_events_for_push(session["id"])
+    total = len(events)
+    batch_size = 500
+    for i in range(0, total, batch_size):
+        batch = events[i:i + batch_size]
+        payload = [{"id": e["id"], "metadata": json.loads(e["metadata"])} for e in batch]
+        for attempt in range(5):
+            try:
+                _request("POST", f"/personal/sessions/{remote_id}/events/resync",
+                         api_url, token, {"events": payload})
+                break
+            except SystemExit as exc:
+                if "429" in str(exc) and attempt < 4:
+                    import time
+                    time.sleep(10 * (attempt + 1))
+                else:
+                    raise
+    return total
 
 
 def sync_research_consent(token: str, api_url: str) -> None:

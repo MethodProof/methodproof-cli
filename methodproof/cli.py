@@ -1929,6 +1929,54 @@ def _push_one(sid: str, cfg: dict, force: bool = False) -> None:
     print(f"  Publish: mp publish {sid[:8]}")
 
 
+def cmd_resync(args: argparse.Namespace) -> None:
+    """Re-push already-synced sessions to overwrite server ciphertext with
+    plaintext. Use when a past migration encrypted sensitive fields with a
+    key the server can't read."""
+    local = getattr(args, "local", False)
+    cfg = config.load(local=local)
+    if not cfg.get("token"):
+        print("Run `methodproof login` first.")
+        sys.exit(1)
+    if cfg.get("e2e_mode"):
+        print("E2E mode is ON — resync would preserve ciphertext. Turn off with `mp e2e off` first.")
+        sys.exit(1)
+
+    from methodproof.sync import resync_events
+
+    sessions = store.list_sessions()
+    candidates = [s for s in sessions if s.get("synced") and s.get("remote_id")]
+
+    if args.session_id:
+        pref = args.session_id
+        candidates = [s for s in candidates
+                      if s["id"].startswith(pref) or (s.get("remote_id") or "").startswith(pref)]
+        if not candidates:
+            print(f"No synced session matches {args.session_id}")
+            sys.exit(1)
+    elif args.since:
+        from datetime import datetime
+        cutoff = datetime.fromisoformat(args.since).timestamp()
+        candidates = [s for s in candidates
+                      if (s.get("completed_at") or s.get("created_at") or 0) >= cutoff]
+
+    if not candidates:
+        print("No synced sessions to resync.")
+        return
+
+    total_events = 0
+    print(f"Resyncing {len(candidates)} sessions (decrypting sensitive fields on push)...")
+    for s in candidates:
+        try:
+            n = resync_events(s, cfg["token"], cfg["api_url"])
+            total_events += n
+            date = datetime.fromtimestamp(s["created_at"]).strftime("%Y-%m-%d") if s.get("created_at") else "?"
+            print(f"  {s['id'][:8]}  {date}  {n:5} events resynced")
+        except SystemExit as exc:
+            print(f"  {s['id'][:8]}  FAILED: {exc}")
+    print(f"\nDone. {total_events} events resynced across {len(candidates)} sessions.")
+
+
 def cmd_tag(args: argparse.Namespace) -> None:
     session = _resolve_session(args.session_id)
     tags = [t.strip() for t in args.tags.split(",") if t.strip()]
@@ -2356,6 +2404,10 @@ def main() -> None:
     pu.add_argument("session_id", nargs="?")
     pu.add_argument("--force", "-f", action="store_true", help="Re-upload all events (replaces previous push)")
     pu.add_argument("--local", action="store_true", help="Push to local dev API (localhost:8000)")
+    rs_ev = sub.add_parser("resync", help="Re-push already-synced sessions to decrypt sensitive fields server-side")
+    rs_ev.add_argument("session_id", nargs="?", help="Session ID prefix (default: all synced)")
+    rs_ev.add_argument("--since", help="Only resync sessions started on or after this date (YYYY-MM-DD)")
+    rs_ev.add_argument("--local", action="store_true", help="Resync against local dev API")
     tg = sub.add_parser("tag", help="Tag a session")
     tg.add_argument("session_id", help="Session ID (prefix ok)")
     tg.add_argument("tags", help="Comma-separated tags")
@@ -2422,7 +2474,7 @@ def main() -> None:
         "init": cmd_init, "start": cmd_start, "stop": cmd_stop, "connect": cmd_connect,
         "view": cmd_view, "log": cmd_log, "status": cmd_status,
         "login": cmd_login, "logout": cmd_logout, "accounts": cmd_accounts, "switch": cmd_switch,
-        "push": cmd_push, "tag": cmd_tag, "publish": cmd_publish,
+        "push": cmd_push, "resync": cmd_resync, "tag": cmd_tag, "publish": cmd_publish,
         "delete": cmd_delete, "review": cmd_review, "consent": cmd_consent,
         "update": cmd_update, "lock": cmd_lock, "reset": cmd_reset, "uninstall": cmd_uninstall,
         "extension": cmd_extension,
