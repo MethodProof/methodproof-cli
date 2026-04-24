@@ -1,6 +1,6 @@
 [project]
 name = "methodproof"
-version = "0.8.5"
+version = "0.8.6"
 description = "See how you code. Capture and visualize your engineering process."
 requires-python = ">=3.12"
 dependencies = ["watchdog>=4.0", "websocket-client>=1.7", "cryptography>=46.0.7", "keyring>=25.0", "textual>=0.59", "rich>=13.7", "sqlcipher3>=0.6"]

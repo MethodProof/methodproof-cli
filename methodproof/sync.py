@@ -117,6 +117,10 @@ def push(session_id: str, token: str, api_url: str, force: bool = False) -> str:
         create_body["session_binding"] = session["session_binding"]
     if session.get("device_id"):
         create_body["device_id"] = session["device_id"]
+    # Send the original capture start so the remote session's duration reflects
+    # the actual session, not the push transaction.
+    if session.get("created_at"):
+        create_body["started_at"] = _iso(session["created_at"])
     result = _request("POST", "/personal/sessions", api_url, token,
                       create_body or None)
     remote_id = result["session_id"]
@@ -190,7 +194,11 @@ def push(session_id: str, token: str, api_url: str, force: bool = False) -> str:
             pass  # cryptography not installed
 
     # Complete (server drains ingest queue + materializes stats — needs longer timeout)
-    _request("PUT", f"/personal/sessions/{remote_id}/complete", api_url, token, timeout=90)
+    complete_body: dict[str, Any] | None = None
+    if session.get("completed_at"):
+        complete_body = {"ended_at": _iso(session["completed_at"])}
+    _request("PUT", f"/personal/sessions/{remote_id}/complete", api_url, token,
+             complete_body, timeout=90)
     store.mark_synced(session_id, remote_id)
 
     # Sync metadata (repo, tags, visibility)
