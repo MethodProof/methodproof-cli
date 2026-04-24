@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.8.6] — 2026-04-24
+
+### Fixed
+- **`mp push` sends real capture-time boundaries** — `POST /personal/sessions` now includes `started_at` from the local `sessions.created_at`, and `PUT /complete` now includes `ended_at` from `sessions.completed_at` (when available). Previously the server stamped both boundaries at push time, so the dashboard's `/personal/sessions` showed a duration equal to how long the push transaction took instead of the real session window. Requires platform ≥ 2026-04-24; older platforms silently ignore the new fields.
+
 ## [0.8.1] — 2026-04-17
 
 ### Added
