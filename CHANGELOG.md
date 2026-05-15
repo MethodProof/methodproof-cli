@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.8.7] — 2026-05-15
+
+### Fixed
+- **`SubagentStop` events now emit `last_message_preview`** (`methodproof/hooks/claude_code.py`) — the Python hook only emitted full `last_assistant_message`, so the dashboard's structural-only view of `agent_complete` events showed nothing for accounts without journal mode. Hook now emits both: full content (server gates by tier) plus a 200-char preview (always survives).
+
 ## [0.8.6] — 2026-04-24
 
 ### Fixed

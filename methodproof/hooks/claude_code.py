@@ -146,6 +146,7 @@ _META_EXTRACTORS = {
     "SubagentStop": lambda d: {
         "tool": _TOOL, "agent_type": d.get("agent_type", "unknown"), "agent_id": d.get("agent_id", ""),
         "last_assistant_message": d.get("last_assistant_message", ""),
+        "last_message_preview": (d.get("last_assistant_message") or "")[:200],
     },
     "TaskCreated": lambda d: {"tool": _TOOL, "task_id": d.get("task_id", ""), "subject": d.get("task_subject", "")},
     "TaskCompleted": lambda d: {"tool": _TOOL, "task_id": d.get("task_id", "")},
