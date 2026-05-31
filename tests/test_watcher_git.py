@@ -9,6 +9,9 @@ from methodproof.agents import watcher
 def _git_init(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    # CI runners have no global git identity; commits need a local one.
+    subprocess.run(["git", "config", "user.email", "test@methodproof.com"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "test"], cwd=path, check=True)
     subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "init"],
                    cwd=path, check=True)
 
