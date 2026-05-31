@@ -26,7 +26,8 @@ def enumerate_sub_repos(watch_dir: str, max_depth: int = 2) -> list[dict[str, st
     def visit(path: str, depth: int) -> None:
         if not os.path.isdir(path):
             return
-        if os.path.isdir(os.path.join(path, ".git")):
+        # `.git` is a directory in a normal clone, a file in a worktree.
+        if os.path.exists(os.path.join(path, ".git")):
             url = _remote_url(path)
             if url and url not in seen_urls:
                 rel = os.path.relpath(path, watch_dir)

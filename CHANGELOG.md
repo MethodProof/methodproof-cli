@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.8.8] — 2026-05-30
+
+### Fixed
+- **Git telemetry inside worktrees** — the watcher and sub-repo enumeration both assumed `.git` is a directory, but in a `git worktree` it is a file pointing at the shared git dir. As a result, running `mp start` from a worktree captured zero `git_commit`/`git_branch_switch` events (the poller raised `NotADirectoryError` reading `.git/refs` and `.git/HEAD`, swallowed silently) and `mp push`/`mp resync` skipped the worktree's repo entirely. The poller now resolves the per-worktree git dir (HEAD) and shared common dir (refs) via `git rev-parse --absolute-git-dir --git-common-dir` (`methodproof/agents/watcher.py`), and sub-repo enumeration detects worktrees via `os.path.exists` rather than `os.path.isdir` (`methodproof/repos.py`).
+
 ## [0.8.7] — 2026-05-15
 
 ### Fixed

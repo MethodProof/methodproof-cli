@@ -71,3 +71,18 @@ def test_enumerate_sub_repos_skips_non_repo_dirs(tmp_path: Path) -> None:
     assert "node_modules" not in rels
     assert "not-a-repo" not in rels
     assert "real" in rels
+
+
+def test_enumerate_sub_repos_detects_worktree(tmp_path: Path) -> None:
+    main = tmp_path / "main"
+    _git_init(main, "https://github.com/me/wt")
+    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "init"],
+                   cwd=main, check=True)
+    wt = tmp_path / "wt-feature"
+    subprocess.run(["git", "worktree", "add", "-q", str(wt), "-b", "feature"],
+                   cwd=main, check=True)
+
+    # `.git` is a file in the worktree, not a directory.
+    assert (wt / ".git").is_file()
+    found = repos.enumerate_sub_repos(str(wt), max_depth=1)
+    assert found == [{"remote_url": "https://github.com/me/wt", "rel_path": ""}]

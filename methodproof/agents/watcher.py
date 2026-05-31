@@ -268,13 +268,39 @@ def _read_branch(head_file: Path) -> str:
         return ""
 
 
+def _resolve_git_dirs(watch_dir: str) -> tuple[Path, Path] | None:
+    """Resolve (git_dir, common_dir) for `watch_dir`, or None if not a git repo.
+
+    HEAD lives in git_dir; shared refs live in common_dir. The two diverge
+    inside a git worktree, where `.git` is a file rather than a directory.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", watch_dir, "rev-parse", "--absolute-git-dir", "--git-common-dir"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    lines = out.stdout.splitlines()
+    if len(lines) < 2:
+        return None
+    git_dir = Path(lines[0].strip())
+    common_dir = Path(lines[1].strip())
+    if not common_dir.is_absolute():
+        common_dir = (Path(watch_dir) / common_dir).resolve()
+    return git_dir, common_dir
+
+
 def _poll_git(watch_dir: str, stop: threading.Event) -> None:
-    """Poll .git/refs for new commits and HEAD for branch switches."""
-    git_dir = Path(watch_dir) / ".git"
-    if not git_dir.exists():
+    """Poll shared refs for new commits and HEAD for branch switches."""
+    dirs = _resolve_git_dirs(watch_dir)
+    if dirs is None:
         return
+    git_dir, common_dir = dirs
     seen: set[str] = set()
-    refs = git_dir / "refs" / "heads"
+    refs = common_dir / "refs" / "heads"
     head_file = git_dir / "HEAD"
     last_branch = _read_branch(head_file)
     while not stop.is_set():
@@ -284,7 +310,7 @@ def _poll_git(watch_dir: str, stop: threading.Event) -> None:
                 if sha not in seen:
                     seen.add(sha)
                     if len(seen) > 1:
-                        _log_commit(watch_dir, sha)
+                        _log_commit(watch_dir, sha, head_file)
         except OSError:
             pass
         current_branch = _read_branch(head_file)
@@ -296,7 +322,7 @@ def _poll_git(watch_dir: str, stop: threading.Event) -> None:
         stop.wait(2)
 
 
-def _log_commit(watch_dir: str, sha: str) -> None:
+def _log_commit(watch_dir: str, sha: str, head_file: Path) -> None:
     try:
         fmt = subprocess.run(
             ["git", "-C", watch_dir, "log", "-1",
@@ -336,7 +362,7 @@ def _log_commit(watch_dir: str, sha: str) -> None:
         meta["body"] = body
     if file_statuses:
         meta["file_statuses"] = file_statuses
-    branch = _read_branch(Path(watch_dir) / ".git" / "HEAD")
+    branch = _read_branch(head_file)
     if branch:
         meta["branch"] = branch
     include_lines = base.is_content_captured()
